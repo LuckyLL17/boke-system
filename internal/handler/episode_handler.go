@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -117,7 +116,7 @@ func (h *EpisodeHandler) Create(c *gin.Context) {
 		Author:        body.Author,
 		CategoryID:    body.CategoryID,
 		Tags:          body.Tags,
-		ChaptersJSON:  strings.TrimSpace(body.ChaptersJSON) + "[]",
+		ChaptersJSON:  body.ChaptersJSON,
 	}
 	ep, err := h.episodeSvc.Create(channelID, userID, req)
 	if err != nil {

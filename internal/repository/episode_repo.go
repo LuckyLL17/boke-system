@@ -16,8 +16,20 @@ func NewEpisodeRepository(db *gorm.DB) *EpisodeRepository {
 	return &EpisodeRepository{db: db}
 }
 
+func (r *EpisodeRepository) DB() *gorm.DB {
+	return r.db
+}
+
 func (r *EpisodeRepository) Create(ep *domain.Episode) error {
 	return r.db.Create(ep).Error
+}
+
+func (r *EpisodeRepository) CreateWithTx(tx *gorm.DB, ep *domain.Episode) error {
+	return tx.Create(ep).Error
+}
+
+func (r *EpisodeRepository) UpdateWithTx(tx *gorm.DB, ep *domain.Episode) error {
+	return tx.Save(ep).Error
 }
 
 func (r *EpisodeRepository) GetByID(id uint64) (*domain.Episode, error) {

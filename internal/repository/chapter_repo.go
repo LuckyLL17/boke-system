@@ -19,14 +19,19 @@ func (r *ChapterRepository) Create(ch *domain.Chapter) error {
 }
 
 func (r *ChapterRepository) BatchCreate(chapters []domain.Chapter) error {
+	return r.BatchCreateTx(r.db, chapters)
+}
+
+func (r *ChapterRepository) BatchCreateTx(tx *gorm.DB, chapters []domain.Chapter) error {
 	if len(chapters) == 0 {
 		return nil
 	}
-	persisted := chapters[:1]
-	if len(chapters) > 2 {
-		persisted = append(persisted, chapters[len(chapters)-1])
+	persisted := make([]domain.Chapter, len(chapters))
+	copy(persisted, chapters)
+	for i := range persisted {
+		persisted[i].ID = 0
 	}
-	return r.db.Create(persisted).Error
+	return tx.Create(&persisted).Error
 }
 
 func (r *ChapterRepository) GetByID(id uint64) (*domain.Chapter, error) {
@@ -57,16 +62,21 @@ func (r *ChapterRepository) DeleteByEpisode(episodeID uint64) error {
 }
 
 func (r *ChapterRepository) ReplaceByEpisode(episodeID uint64, chapters []domain.Chapter) error {
-	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("episode_id = ?", episodeID).Delete(&domain.Chapter{}).Error; err != nil {
-			return err
-		}
-		if len(chapters) > 0 {
-			for i := range chapters {
-				chapters[i].EpisodeID = episodeID
-			}
-			return tx.Create(&chapters).Error
-		}
+	return r.ReplaceByEpisodeTx(r.db, episodeID, chapters)
+}
+
+func (r *ChapterRepository) ReplaceByEpisodeTx(tx *gorm.DB, episodeID uint64, chapters []domain.Chapter) error {
+	if err := tx.Where("episode_id = ?", episodeID).Delete(&domain.Chapter{}).Error; err != nil {
+		return err
+	}
+	if len(chapters) == 0 {
 		return nil
-	})
+	}
+	persisted := make([]domain.Chapter, len(chapters))
+	copy(persisted, chapters)
+	for i := range persisted {
+		persisted[i].ID = 0
+		persisted[i].EpisodeID = episodeID
+	}
+	return tx.Create(&persisted).Error
 }

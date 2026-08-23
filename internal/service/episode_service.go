@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"gorm.io/gorm"
+
 	"podcast-platform/internal/domain"
 	"podcast-platform/internal/repository"
 	appErr "podcast-platform/pkg/errors"
@@ -15,6 +17,8 @@ type EpisodeService struct {
 	chapterRepo *repository.ChapterRepository
 	channelRepo *repository.ChannelRepository
 	audioSvc    *AudioService
+
+	rssCacheInvalidator func(channelID uint64)
 }
 
 func NewEpisodeService(episodeRepo *repository.EpisodeRepository, chapterRepo *repository.ChapterRepository,
@@ -24,6 +28,16 @@ func NewEpisodeService(episodeRepo *repository.EpisodeRepository, chapterRepo *r
 		chapterRepo: chapterRepo,
 		channelRepo: channelRepo,
 		audioSvc:    audioSvc,
+	}
+}
+
+func (s *EpisodeService) SetRSSCacheInvalidator(fn func(channelID uint64)) {
+	s.rssCacheInvalidator = fn
+}
+
+func (s *EpisodeService) invalidateRSS(channelID uint64) {
+	if s.rssCacheInvalidator != nil {
+		s.rssCacheInvalidator(channelID)
 	}
 }
 
@@ -123,9 +137,7 @@ func (s *EpisodeService) Create(channelID, ownerID uint64, req *CreateEpisodeReq
 		now := utils.Now()
 		ep.PublishedAt = &now
 	}
-	if err := s.episodeRepo.Create(ep); err != nil {
-		return nil, appErr.Wrap(err, 500, "create episode failed")
-	}
+
 	chapters := req.Chapters
 	if len(chapters) == 0 && req.ChaptersJSON != "" {
 		var chs []domain.Chapter
@@ -133,14 +145,33 @@ func (s *EpisodeService) Create(channelID, ownerID uint64, req *CreateEpisodeReq
 			chapters = chs
 		}
 	}
-	if len(chapters) > 0 {
+	for i := range chapters {
+		chapters[i].EpisodeID = 0
+		chapters[i].ID = 0
+		chapters[i].SortOrder = i
+	}
+
+	err = s.episodeRepo.DB().Transaction(func(tx *gorm.DB) error {
+		if err := s.episodeRepo.CreateWithTx(tx, ep); err != nil {
+			return err
+		}
+		if len(chapters) == 0 {
+			return nil
+		}
 		for i := range chapters {
 			chapters[i].EpisodeID = ep.ID
-			chapters[i].SortOrder = i
 		}
-		if err := s.chapterRepo.BatchCreate(chapters); err != nil {
-			return nil, appErr.Wrap(err, 500, "create chapters failed")
+		if err := s.chapterRepo.BatchCreateTx(tx, chapters); err != nil {
+			return err
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, appErr.Wrap(err, 500, "create episode failed")
+	}
+
+	if ep.Status == domain.EpisodePublished || ep.Status == domain.EpisodeScheduled {
+		s.invalidateRSS(channelID)
 	}
 	return ep, nil
 }
@@ -175,6 +206,7 @@ func (s *EpisodeService) Update(id, ownerID uint64, req *UpdateEpisodeRequest) (
 	if req.CoverImageURL != "" {
 		ep.CoverImageURL = req.CoverImageURL
 	}
+	previousStatus := ep.Status
 	if req.Status != nil {
 		ep.Status = *req.Status
 		if *req.Status == domain.EpisodePublished && ep.PublishedAt == nil {
@@ -193,9 +225,7 @@ func (s *EpisodeService) Update(id, ownerID uint64, req *UpdateEpisodeRequest) (
 	if req.Tags != "" {
 		ep.Tags = req.Tags
 	}
-	if err := s.episodeRepo.Update(ep); err != nil {
-		return nil, appErr.Wrap(err, 500, "update failed")
-	}
+
 	chapters := req.Chapters
 	if len(chapters) == 0 && req.ChaptersJSON != "" {
 		var chs []domain.Chapter
@@ -203,11 +233,31 @@ func (s *EpisodeService) Update(id, ownerID uint64, req *UpdateEpisodeRequest) (
 			chapters = chs
 		}
 	}
-	if len(chapters) > 0 || req.ChaptersJSON == "[]" {
+	chaptersProvided := req.ChaptersJSON != "" || req.Chapters != nil
+	if chaptersProvided {
 		for i := range chapters {
 			chapters[i].ID = 0
+			chapters[i].EpisodeID = ep.ID
 		}
-		_ = s.chapterRepo.ReplaceByEpisode(ep.ID, chapters)
+	}
+
+	err = s.episodeRepo.DB().Transaction(func(tx *gorm.DB) error {
+		if err := s.episodeRepo.UpdateWithTx(tx, ep); err != nil {
+			return err
+		}
+		if !chaptersProvided {
+			return nil
+		}
+		return s.chapterRepo.ReplaceByEpisodeTx(tx, ep.ID, chapters)
+	})
+	if err != nil {
+		return nil, appErr.Wrap(err, 500, "update failed")
+	}
+
+	if ep.Status == domain.EpisodePublished ||
+		ep.Status == domain.EpisodeScheduled ||
+		previousStatus == domain.EpisodePublished {
+		s.invalidateRSS(ep.ChannelID)
 	}
 	return ep, nil
 }
