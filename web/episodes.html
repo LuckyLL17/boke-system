@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>节目管理 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+</head>
+<body>
+<nav class="navbar"><div class="navbar-inner">
+  <a href="/dashboard" class="logo">🎙️ Podcast Admin</a>
+  <div class="nav-links"></div>
+</div></nav>
+<div class="container page">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+    <div>
+      <h1 class="page-title">节目管理</h1>
+      <p class="page-sub">上传音频、创建节目</p>
+    </div>
+    <div style="display:flex;gap:12px">
+      <button class="btn btn-secondary" onclick="openUploadModal()">📤 上传音频</button>
+      <button class="btn btn-primary" onclick="openEpisodeModal()">+ 创建节目</button>
+    </div>
+  </div>
+  <div class="card">
+    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <select class="form-select" id="chSel" style="max-width:220px" onchange="loadList(1)"><option value="">选择频道...</option></select>
+      <input class="form-input" id="kw" style="max-width:240px" placeholder="搜索节目..." onkeyup="if(event.key==='Enter')loadList(1)">
+      <select class="form-select" id="st" style="max-width:160px" onchange="loadList(1)">
+        <option value="">全部</option><option value="draft">草稿</option>
+        <option value="published">已发布</option><option value="scheduled">待发布</option>
+      </select>
+      <button class="btn btn-secondary" onclick="loadList(1)">搜索</button>
+    </div>
+    <table class="table"><thead><tr><th>ID</th><th>标题</th><th>频道</th><th>时长</th><th>大小</th><th>播放</th><th>状态</th><th>创建</th><th>操作</th></tr></thead>
+    <tbody id="tbody"><tr><td colspan="9" class="empty">加载中...</td></tr></tbody></table>
+    <div class="pagination" id="pg"></div>
+  </div>
+</div>
+<div id="modalRoot"></div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+requireAuth();
+renderNav("episodes");
+let page = 1, pageSize = 20;
+let myChannels = [];
+
+async function loadChannels() {
+  const r = await get("/channels/mine/list?page_size=100");
+  if (r.code === 0) {
+    myChannels = r.data;
+    $("#chSel").innerHTML = '<option value="">选择频道...</option>' +
+      r.data.map(c => `<option value="${c.id}">${escapeHtml(c.title)}</option>`).join("");
+    const cur = new URLSearchParams(location.search).get("channel");
+    if (cur) $("#chSel").value = cur;
+  }
+}
+
+async function loadList(p) {
+  page = p || 1;
+  const ch = $("#chSel").value;
+  const kw = $("#kw").value;
+  const st = $("#st").value;
+  updateQuery({channel:ch, page, keyword:kw, status:st});
+  if (!ch) {
+    $("#tbody").innerHTML = `<tr><td colspan="9" class="empty">请先选择频道</td></tr>`; $("#pg").innerHTML = "";
+    return;
+  }
+  const r = await get(`/channels/${ch}/episodes` + qs({page, page_size:pageSize, keyword:kw, status:st}));
+  if (r.code !== 0) { $("#tbody").innerHTML = `<tr><td colspan="9" class="empty">${escapeHtml(r.message)}</td></tr>`; return; }
+  if (!r.data.length) { $("#tbody").innerHTML = `<tr><td colspan="9" class="empty">暂无节目</td></tr>`; $("#pg").innerHTML = ""; return; }
+  const chMap = Object.fromEntries(myChannels.map(c => [c.id, c.title]));
+  $("#tbody").innerHTML = r.data.map(e => `<tr>
+    <td>${e.id}</td>
+    <td><strong>${escapeHtml(e.title)}</strong><div style="color:var(--muted);font-size:12px">${e.season_number?"S"+e.season_number:""}${e.episode_number?" E"+e.episode_number:""}</div></td>
+    <td>${escapeHtml(chMap[e.channel_id]||e.channel_id)}</td>
+    <td>${formatDuration(e.duration)}</td>
+    <td>${formatSize(e.audio_file_size)}</td>
+    <td>${e.play_count||0}</td>
+    <td><span class="badge badge-${epSt(e.status)}">${epStT(e.status)}</span></td>
+    <td>${formatDate(e.created_at)}</td>
+    <td><div class="table-actions">
+      <a class="btn btn-sm btn-secondary" href="/player?id=${e.id}">播放</a>
+      <button class="btn btn-sm btn-secondary" onclick="editEp(${e.id})">编辑</button>
+      <button class="btn btn-sm btn-danger" onclick="delEp(${e.id},'${escapeHtml(e.title)}')">删除</button>
+    </div></td>
+  </tr>`).join("");
+  renderPagination(r.total);
+}
+function epSt(s){return({published:"published",draft:"draft",scheduled:"pending",archived:"rejected"}[s])||"draft"}
+function epStT(s){return({published:"已发布",draft:"草稿",scheduled:"待发布",archived:"归档"}[s])||s}
+
+function renderPagination(total) {
+  const pages = Math.ceil(total / pageSize);
+  if (pages <= 1) { $("#pg").innerHTML = ""; return; }
+  let html = `<button class="page-btn" ${page<=1?"disabled":""} onclick="loadList(${page-1})">上一页</button>`;
+  const start = Math.max(1, page - 3), end = Math.min(pages, page + 3);
+  for (let i = start; i <= end; i++) html += `<button class="page-btn ${i===page?"active":""}" onclick="loadList(${i})">${i}</button>`;
+  html += `<button class="page-btn" ${page>=pages?"disabled":""} onclick="loadList(${page+1})">下一页</button>`;
+  html += `<span style="color:var(--muted);margin-left:12px">共 ${total} 条</span>`;
+  $("#pg").innerHTML = html;
+}
+
+function openUploadModal() {
+  $("#modalRoot").innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-head"><h3>上传音频</h3><button class="btn btn-sm btn-secondary" onclick="closeModal()">×</button></div>
+      <div class="form-group"><label class="form-label">选择音频文件 (mp3/m4a/wav/ogg, 最大 500MB)</label>
+        <input class="form-input" id="fileInput" type="file" accept="audio/*">
+      </div>
+      <div id="progWrap" style="display:none"><div class="form-label"><span id="progText">0%</span></div><div class="progress"><div class="progress-bar" id="progBar" style="width:0"></div></div></div>
+      <div id="result" style="display:none;margin-top:16px" class="card" style="padding:16px"></div>
+      <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">关闭</button>
+        <button class="btn btn-primary" onclick="doUpload()" id="upBtn">开始上传</button>
+      </div>
+    </div></div>`;
+}
+
+async function doUpload() {
+  const fi = $("#fileInput").files[0];
+  if (!fi) return toast("请先选择文件", "error");
+  const fd = new FormData();
+  fd.append("file", fi);
+  $("#progWrap").style.display = "block";
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", API + "/upload/audio");
+  xhr.setRequestHeader("Authorization", "Bearer " + getToken());
+  xhr.upload.onprogress = e => {
+    const p = Math.round(e.loaded / e.total * 100);
+    $("#progBar").style.width = p + "%"; $("#progText").textContent = p + "%";
+  };
+  xhr.onload = () => {
+    try {
+      const d = JSON.parse(xhr.responseText);
+      if (d.code === 0) {
+        const r = d.data;
+        $("#result").style.display = "block";
+        $("#result").innerHTML = `<div style="font-weight:600;margin-bottom:8px">✅ 上传成功</div>
+          <div>文件名：${escapeHtml(r.file_name)}</div>
+          <div>URL：<code>${escapeHtml(r.file_url)}</code></div>
+          <div>时长：${formatDuration(r.duration)} ｜ 大小：${formatSize(r.file_size)} ｜ 码率：${r.bit_rate}bps</div>
+          <button class="btn btn-sm btn-primary" style="margin-top:12px" onclick="fillAudio(${JSON.stringify(r).replace(/"/g,'&quot;')})">使用此文件创建节目</button>`;
+      } else { toast(d.message, "error"); }
+    } catch(e) { toast("上传失败", "error"); }
+  };
+  xhr.send(fd);
+}
+
+function fillAudio(r) {
+  const currentCh = $("#chSel").value;
+  if (!currentCh && myChannels.length) $("#chSel").value = myChannels[0].id;
+  closeModal();
+  openEpisodeModal(null, r);
+}
+
+function openEpisodeModal(ep, presetAudio) {
+  const isEdit = !!ep;
+  const d = ep || { title:"", description:"", show_notes:"", cover_image_url:"", audio_file_url:"",
+    audio_file_size:0, duration:0, status:"draft", season_number:null, episode_number:null,
+    sample_rate:null, bit_rate:null, mime_type:"", scheduled_at:"", explicit:false, tags:[], chapters_json:"" };
+  if (presetAudio) {
+    d.audio_file_url = presetAudio.file_url;
+    d.audio_file_size = presetAudio.file_size;
+    d.duration = presetAudio.duration;
+    d.sample_rate = presetAudio.sample_rate;
+    d.bit_rate = presetAudio.bit_rate;
+    d.mime_type = presetAudio.mime_type;
+  }
+  $("#modalRoot").innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal" style="max-width:720px">
+      <div class="modal-head"><h3>${isEdit?"编辑":"创建"}节目</h3><button class="btn btn-sm btn-secondary" onclick="closeModal()">×</button></div>
+      <form id="epForm">
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">频道 *</label>
+            <select class="form-select" id="channelSel" required>
+              ${myChannels.map(c => `<option value="${c.id}" ${d.channel_id===c.id?"selected":""}>${escapeHtml(c.title)}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">标题 *</label><input class="form-input" name="title" required value="${escapeHtml(d.title)}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">季号</label><input class="form-input" name="season_number" type="number" value="${d.season_number ?? ""}"></div>
+          <div class="form-group"><label class="form-label">集号</label><input class="form-input" name="episode_number" type="number" value="${d.episode_number ?? ""}"></div>
+        </div>
+        <div class="form-group"><label class="form-label">封面图 URL</label><input class="form-input" name="cover_image_url" value="${escapeHtml(d.cover_image_url||"")}"></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">音频 URL</label><input class="form-input" name="audio_file_url" required value="${escapeHtml(d.audio_file_url||"")}"></div>
+          <div class="form-group"><label class="form-label">时长 (秒)</label><input class="form-input" name="duration" type="number" value="${d.duration||0}"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">文件大小 (字节)</label><input class="form-input" name="audio_file_size" type="number" value="${d.audio_file_size||0}"></div>
+          <div class="form-group"><label class="form-label">MIME</label><input class="form-input" name="mime_type" value="${escapeHtml(d.mime_type||"")}"></div>
+        </div>
+        <div class="form-group"><label class="form-label">简介</label><textarea class="form-textarea" name="description">${escapeHtml(d.description||"")}</textarea></div>
+        <div class="form-group"><label class="form-label">节目备注 (Shownotes)</label><textarea class="form-textarea" name="show_notes" style="min-height:80px">${escapeHtml(d.show_notes||"")}</textarea></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">状态</label>
+            <select class="form-select" name="status">
+              <option value="draft" ${d.status==="draft"?"selected":""}>草稿</option>
+              <option value="published" ${d.status==="published"?"selected":""}>发布</option>
+              <option value="scheduled" ${d.status==="scheduled"?"selected":""}>定时发布</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">定时发布时间</label><input class="form-input" name="scheduled_at" type="datetime-local" value="${(d.scheduled_at||"").slice(0,16)}"></div>
+        </div>
+        <div class="form-group"><label>标签 (逗号分隔) <input class="form-input" name="tags" value="${escapeHtml((d.tags||[]).join(", "))}"></label></div>
+        <div class="form-group"><label><input type="checkbox" name="explicit" ${d.explicit?"checked":""}> 包含显式内容</label></div>
+        <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+          <button type="submit" class="btn btn-primary">${isEdit?"保存":"创建"}</button>
+        </div>
+      </form>
+    </div></div>`;
+  $("#epForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target;
+    const channelID = $("#channelSel").value;
+    const body = {
+      title: f.title.value.trim(),
+      season_number: f.season_number.value ? +f.season_number.value : null,
+      episode_number: f.episode_number.value ? +f.episode_number.value : null,
+      description: f.description.value, show_notes: f.show_notes.value,
+      cover_image_url: f.cover_image_url.value,
+      audio_file_url: f.audio_file_url.value,
+      audio_file_size: +f.audio_file_size.value,
+      duration: +f.duration.value, sample_rate: d.sample_rate, bit_rate: +f.bit_rate.value || d.bit_rate,
+      mime_type: f.mime_type.value, status: f.status.value,
+      scheduled_at: f.scheduled_at.value ? new Date(f.scheduled_at.value).toISOString() : null,
+      explicit: f.explicit.checked,
+      tags: f.tags.value.split(",").map(s=>s.trim()).filter(Boolean),
+    };
+    const r = isEdit ? await put(`/episodes/${ep.id}`, body) : await post(`/channels/${channelID}/episodes`, body);
+    if (r.code === 0) { toast(isEdit?"已保存":"已创建", "success"); closeModal(); loadList(1); }
+    else toast(r.message, "error");
+  });
+}
+
+async function editEp(id) {
+  const r = await get("/episodes/" + id);
+  if (r.code === 0) openEpisodeModal(r.data);
+}
+function delEp(id, title) {
+  if (!confirmDialog(`确定删除节目"${title}"？`)) return;
+  del("/episodes/" + id).then(r => {
+    if (r.code === 0) { toast("已删除", "success"); loadList(page); } else toast(r.message, "error");
+  });
+}
+function closeModal(){ $("#modalRoot").innerHTML = ""; }
+
+(async function init(){
+  await loadChannels();
+  const q = pageQuery({page:1});
+  if (q.channel) { const r = await loadList(+q.page); }
+  else if (myChannels.length) { $("#chSel").value = myChannels[0].id; loadList(1); }
+})();
+</script>
+</body>
+</html>
