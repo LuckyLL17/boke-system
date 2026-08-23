@@ -29,17 +29,17 @@ type CreateChannelRequest struct {
 }
 
 type UpdateChannelRequest struct {
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	CoverImageURL  string `json:"cover_image_url"`
-	Language       string `json:"language"`
-	Copyright      string `json:"copyright"`
-	Author         string `json:"author"`
-	Email          string `json:"email"`
-	CategoryID     uint64 `json:"category_id"`
-	Explicit       *bool  `json:"explicit"`
-	CustomDomain   string `json:"custom_domain"`
-	ITunesCategory string `json:"itunes_category"`
+	Title          *string `json:"title"`
+	Description    *string `json:"description"`
+	CoverImageURL  *string `json:"cover_image_url"`
+	Language       *string `json:"language"`
+	Copyright      *string `json:"copyright"`
+	Author         *string `json:"author"`
+	Email          *string `json:"email"`
+	CategoryID     *uint64 `json:"category_id"`
+	Explicit       *bool   `json:"explicit"`
+	CustomDomain   *string `json:"custom_domain"`
+	ITunesCategory *string `json:"itunes_category"`
 }
 
 func (s *ChannelService) Create(ownerID uint64, req *CreateChannelRequest) (*domain.Channel, error) {
@@ -91,27 +91,46 @@ func (s *ChannelService) Update(id, ownerID uint64, req *UpdateChannelRequest) (
 	if ch.OwnerID != ownerID {
 		return nil, appErr.ErrNoPermission
 	}
-	if req.Title != "" {
-		ch.Title = req.Title
+	if req.Title != nil {
+		if *req.Title == "" {
+			return nil, appErr.ErrInvalidParams
+		}
+		ch.Title = *req.Title
 	}
-	ch.Description = req.Description
-	ch.CoverImageURL = req.CoverImageURL
-	if req.Language != "" {
-		ch.Language = req.Language
+	if req.Description != nil {
+		ch.Description = *req.Description
 	}
-	ch.Copyright = req.Copyright
-	ch.Author = req.Author
-	ch.Email = req.Email
-	if req.CategoryID > 0 {
-		ch.CategoryID = &req.CategoryID
-	} else if req.CategoryID == 0 && ch.CategoryID != nil {
-		ch.CategoryID = nil
+	if req.CoverImageURL != nil {
+		ch.CoverImageURL = *req.CoverImageURL
+	}
+	if req.Language != nil {
+		ch.Language = *req.Language
+	}
+	if req.Copyright != nil {
+		ch.Copyright = *req.Copyright
+	}
+	if req.Author != nil {
+		ch.Author = *req.Author
+	}
+	if req.Email != nil {
+		ch.Email = *req.Email
+	}
+	if req.CategoryID != nil {
+		if *req.CategoryID > 0 {
+			ch.CategoryID = req.CategoryID
+		} else {
+			ch.CategoryID = nil
+		}
 	}
 	if req.Explicit != nil {
 		ch.Explicit = *req.Explicit
 	}
-	ch.CustomDomain = req.CustomDomain
-	ch.ITunesCategory = req.ITunesCategory
+	if req.CustomDomain != nil {
+		ch.CustomDomain = *req.CustomDomain
+	}
+	if req.ITunesCategory != nil {
+		ch.ITunesCategory = *req.ITunesCategory
+	}
 	if err := s.channelRepo.Update(ch); err != nil {
 		return nil, appErr.Wrap(err, 500, "update failed")
 	}

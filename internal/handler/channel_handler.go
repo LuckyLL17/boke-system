@@ -87,9 +87,6 @@ func (h *ChannelHandler) Update(c *gin.Context) {
 		CustomDomain:   body.CustomDomain,
 		ITunesCategory: body.ITunesCategory,
 	}
-	if body.Description == "" {
-		req.Description = ""
-	}
 	ch, err := h.channelSvc.Update(id, userID, req)
 	if err != nil {
 		ae, _ := appErr.As(err)
