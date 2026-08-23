@@ -14,6 +14,12 @@ func NewChannelRepository(db *gorm.DB) *ChannelRepository {
 	return &ChannelRepository{db: db}
 }
 
+func (r *ChannelRepository) DB() *gorm.DB { return r.db }
+
+func (r *ChannelRepository) WithTx(tx *gorm.DB) *ChannelRepository {
+	return &ChannelRepository{db: tx}
+}
+
 func (r *ChannelRepository) Create(ch *domain.Channel) error {
 	return r.db.Create(ch).Error
 }
@@ -98,13 +104,15 @@ func (r *ChannelRepository) IncrementSubscribers(channelID uint64, delta int) er
 }
 
 func (r *ChannelRepository) IncrementTotalPlays(channelID uint64, delta int64) error {
-	var ch domain.Channel
-	if err := r.db.Where("id = ?", channelID).First(&ch).Error; err != nil {
-		return err
+	result := r.db.Model(&domain.Channel{}).Where("id = ?", channelID).
+		UpdateColumn("total_plays", gorm.Expr("total_plays + ?", delta))
+	if result.Error != nil {
+		return result.Error
 	}
-	ch.TotalPlays += delta
-	return r.db.Model(&domain.Channel{}).Where("id = ?", channelID).
-		Update("total_plays", ch.TotalPlays).Error
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *ChannelRepository) UpdateStatus(id uint64, status domain.ChannelStatus) error {

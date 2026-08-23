@@ -16,6 +16,12 @@ func NewEpisodeRepository(db *gorm.DB) *EpisodeRepository {
 	return &EpisodeRepository{db: db}
 }
 
+func (r *EpisodeRepository) DB() *gorm.DB { return r.db }
+
+func (r *EpisodeRepository) WithTx(tx *gorm.DB) *EpisodeRepository {
+	return &EpisodeRepository{db: tx}
+}
+
 func (r *EpisodeRepository) Create(ep *domain.Episode) error {
 	return r.db.Create(ep).Error
 }
@@ -72,13 +78,15 @@ func (r *EpisodeRepository) ExistsBySlug(channelID uint64, slug string) (bool, e
 }
 
 func (r *EpisodeRepository) IncrementPlayCount(episodeID uint64, delta int64) error {
-	var ep domain.Episode
-	if err := r.db.Where("id = ?", episodeID).First(&ep).Error; err != nil {
-		return err
+	result := r.db.Model(&domain.Episode{}).Where("id = ?", episodeID).
+		UpdateColumn("play_count", gorm.Expr("play_count + ?", delta))
+	if result.Error != nil {
+		return result.Error
 	}
-	ep.PlayCount += delta
-	return r.db.Model(&domain.Episode{}).Where("id = ?", episodeID).
-		Update("play_count", ep.PlayCount).Error
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *EpisodeRepository) IncrementCommentCount(episodeID uint64, delta int) error {

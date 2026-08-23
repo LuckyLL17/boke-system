@@ -13,6 +13,8 @@ import (
 	appErr "podcast-platform/pkg/errors"
 	"podcast-platform/pkg/ipgeo"
 	"podcast-platform/pkg/utils"
+
+	"gorm.io/gorm"
 )
 
 type StatsService struct {
@@ -233,14 +235,20 @@ func (s *StatsService) RecordPlaybackStart(req PlaybackStartRequest) (uint64, er
 		StartAt:    utils.Now(),
 		Source:     req.Source,
 	}
-	if err := s.playbackRepo.Create(pb); err != nil {
+	err = s.playbackRepo.DB().Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(pb).Error; err != nil {
+			return err
+		}
+		if err := s.episodeRepo.WithTx(tx).IncrementPlayCount(req.EpisodeID, 1); err != nil {
+			return err
+		}
+		if err := s.channelRepo.WithTx(tx).IncrementTotalPlays(ep.ChannelID, 1); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return 0, appErr.Wrap(err, 500, "record playback")
-	}
-	if err := s.episodeRepo.IncrementPlayCount(req.EpisodeID, 1); err != nil {
-		return 0, appErr.Wrap(err, 500, "update episode plays")
-	}
-	if err := s.channelRepo.IncrementTotalPlays(ep.ChannelID, 1); err != nil {
-		return 0, appErr.Wrap(err, 500, "update channel plays")
 	}
 	return pb.ID, nil
 }

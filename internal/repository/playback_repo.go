@@ -16,6 +16,12 @@ func NewPlaybackRepository(db *gorm.DB) *PlaybackRepository {
 	return &PlaybackRepository{db: db}
 }
 
+func (r *PlaybackRepository) DB() *gorm.DB { return r.db }
+
+func (r *PlaybackRepository) WithTx(tx *gorm.DB) *PlaybackRepository {
+	return &PlaybackRepository{db: tx}
+}
+
 func (r *PlaybackRepository) Create(p *domain.Playback) error {
 	return r.db.Create(p).Error
 }

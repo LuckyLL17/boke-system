@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"gorm.io/gorm"
+
 	"podcast-platform/internal/domain"
 	"podcast-platform/internal/repository"
 	appErr "podcast-platform/pkg/errors"
@@ -257,9 +259,12 @@ func (s *EpisodeService) IncrementPlay(episodeID uint64) error {
 	if err != nil {
 		return err
 	}
-	_ = s.episodeRepo.IncrementPlayCount(episodeID, 1)
-	_ = s.channelRepo.IncrementTotalPlays(ep.ChannelID, 1)
-	return nil
+	return s.episodeRepo.DB().Transaction(func(tx *gorm.DB) error {
+		if err := s.episodeRepo.WithTx(tx).IncrementPlayCount(episodeID, 1); err != nil {
+			return err
+		}
+		return s.channelRepo.WithTx(tx).IncrementTotalPlays(ep.ChannelID, 1)
+	})
 }
 
 func (s *EpisodeService) Like(episodeID uint64, delta int) error {
