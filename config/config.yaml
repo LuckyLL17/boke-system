@@ -1,0 +1,61 @@
+server:
+  port: 8080
+  mode: debug
+  base_url: http://localhost:8080
+  web_dir: ./web
+  log_dir: ./logs
+
+database:
+  host: localhost
+  port: 5432
+  user: podcast
+  password: podcast123
+  dbname: podcast_db
+  sslmode: disable
+  auto_migrate: true
+
+redis:
+  host: localhost
+  port: 6379
+  password: ""
+  db: 0
+
+jwt:
+  secret: podcast-secret-key-please-change-in-production
+  expire_hours: 24
+
+storage:
+  type: local
+  local_path: ./storage
+  base_url: http://localhost:8080/storage
+  max_size: 524288000
+  chunk_size: 5242880
+  allowed_exts:
+    - mp3
+    - m4a
+    - wav
+    - ogg
+    - flac
+    - aac
+  local:
+    path: ./storage/audio
+  minio:
+    endpoint: localhost:9000
+    access_key: minioadmin
+    secret_key: minioadmin
+    bucket: podcast
+    use_ssl: false
+
+log:
+  level: debug
+  path: ./logs
+  filename: app.log
+
+cache:
+  rss_ttl: 3600
+  stats_ttl: 1800
+
+worker:
+  rss_cache_interval: 300
+  stats_aggregate_interval: 600
+  cleanup_interval: 3600
