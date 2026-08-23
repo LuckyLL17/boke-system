@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>仪表盘 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+</head>
+<body>
+<nav class="navbar"><div class="navbar-inner">
+  <a href="/dashboard" class="logo">🎙️ Podcast Admin</a>
+  <div class="nav-links"></div>
+</div></nav>
+<div class="container page">
+  <h1 class="page-title">仪表盘</h1>
+  <p class="page-sub" id="welcome">加载中...</p>
+  <div class="grid grid-4" id="statGrid">
+    <div class="stat-card"><div class="stat-label">我的频道</div><div class="stat-value" id="stChannels">-</div></div>
+    <div class="stat-card"><div class="stat-label">节目总数</div><div class="stat-value" id="stEpisodes">-</div></div>
+    <div class="stat-card"><div class="stat-label">总播放</div><div class="stat-value" id="stPlays">-</div></div>
+    <div class="stat-card"><div class="stat-label">订阅者</div><div class="stat-value" id="stSubs">-</div></div>
+  </div>
+  <div class="card" style="margin-top:24px">
+    <div class="card-header"><h2 class="card-title">我的频道</h2>
+      <a class="btn btn-primary btn-sm" href="/channels">管理频道 →</a>
+    </div>
+    <div id="channelList" class="channel-list"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2 class="card-title">最近节目</h2>
+      <a class="btn btn-primary btn-sm" href="/episodes">管理节目 →</a>
+    </div>
+    <div id="epList"><table class="table"><thead><tr><th>标题</th><th>频道</th><th>状态</th><th>时长</th><th>播放</th><th>更新</th></tr></thead><tbody id="epTbody"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody></table></div>
+  </div>
+</div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+requireAuth();
+renderNav("dashboard");
+(async function init() {
+  const me = await get("/auth/me");
+  if (me.code === 0) {
+    setUser(me.data);
+    renderNav("dashboard");
+    $("#welcome").textContent = `你好，${me.data.nickname || me.data.username}！`;
+  }
+  const ch = await get("/channels/mine/list" + qs({ page: 1, page_size: 12 }));
+  if (ch.code === 0) {
+    $("#stChannels").textContent = ch.total;
+    $("#channelList").innerHTML = ch.data.length ? ch.data.map(renderChannelCard).join("") :
+      '<div style="grid-column:1/-1" class="empty">还没有频道，<a href="/channels">创建一个</a></div>';
+    loadEpisodes(ch.data);
+  }
+})();
+
+function renderChannelCard(c) {
+  const cover = c.cover_image_url || `https://placehold.co/600x340/6366f1/fff?text=${encodeURIComponent(c.title)}`;
+  return `<div class="channel-item">
+    <img class="channel-cover" src="${cover}" alt="">
+    <div class="channel-body">
+      <div class="channel-title">${escapeHtml(c.title)}</div>
+      <div class="channel-desc">${escapeHtml(c.description || "暂无简介")}</div>
+      <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between">
+        <span class="badge badge-${statusClass(c.status)}">${statusText(c.status)}</span>
+        <a class="btn btn-sm btn-secondary" href="/rss-view?channel=${c.id}">RSS</a>
+      </div>
+    </div>
+  </div>`;
+}
+function statusClass(s){return ({pending:"pending",approved:"approved",rejected:"rejected"})[s]||"draft"}
+function statusText(s){return ({pending:"审核中",approved:"已通过",rejected:"已拒绝",published:"已发布"})[s]||s}
+async function loadEpisodes(channels) {
+  let total = 0;
+  let list = [];
+  for (const c of channels.slice(0, 5)) {
+    const r = await get(`/channels/${c.id}/episodes` + qs({page:1,page_size:3}));
+    if (r.code === 0) {
+      total += r.total || 0;
+      for (const e of r.data) list.push({...e, chTitle: c.title});
+    }
+  }
+  list.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  $("#stEpisodes").textContent = total;
+  $("#stPlays").textContent = list.reduce((s, e) => s + (e.play_count || 0), 0);
+  if (!list.length) {
+    $("#epTbody").innerHTML = `<tr><td colspan="6" class="empty">暂无节目</td></tr>`;
+    return;
+  }
+  $("#epTbody").innerHTML = list.slice(0, 10).map(e => `
+    <tr>
+      <td><a href="/episodes">${escapeHtml(e.title)}</a></td>
+      <td>${escapeHtml(e.chTitle)}</td>
+      <td><span class="badge badge-${epStatus(e.status)}">${epStatusText(e.status)}</span></td>
+      <td>${formatDuration(e.duration)}</td>
+      <td>${e.play_count || 0}</td>
+      <td>${formatDate(e.updated_at)}</td>
+    </tr>`).join("");
+}
+function epStatus(s){return ({published:"published",draft:"draft",scheduled:"pending",archived:"rejected"}[s])||"draft"}
+function epStatusText(s){return ({published:"已发布",draft:"草稿",scheduled:"待发布",archived:"归档"}[s])||s}
+</script>
+</body>
+</html>
