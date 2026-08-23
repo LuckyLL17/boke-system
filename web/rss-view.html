@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RSS 管理 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+</head>
+<body>
+<nav class="navbar"><div class="navbar-inner">
+  <a href="/dashboard" class="logo">🎙️ Podcast Admin</a>
+  <div class="nav-links"></div>
+</div></nav>
+<div class="container page">
+  <h1 class="page-title">RSS 订阅</h1>
+  <p class="page-sub">生成并分享你的播客 RSS 到各平台</p>
+  <div class="card">
+    <div class="form-group">
+      <label class="form-label">选择频道</label>
+      <select class="form-select" id="chSel" onchange="main()" style="max-width:360px"><option value="">选择频道...</option></select>
+    </div>
+  </div>
+  <div id="rssArea" style="display:none">
+    <div class="card">
+      <div class="card-header"><h2 class="card-title">RSS Feed 信息</h2>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm btn-secondary" onclick="refreshFeed()">🔄 刷新缓存</button>
+          <a class="btn btn-sm btn-primary" id="rssOpenBtn" target="_blank">查看 XML</a>
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div>
+          <div class="form-label">RSS 链接</div>
+          <div style="display:flex;gap:8px">
+            <input class="form-input" id="rssUrl" readonly>
+            <button class="btn btn-secondary" onclick="copyUrl()">复制</button>
+          </div>
+          <div class="form-label" style="margin-top:16px">Slug 链接</div>
+          <div style="display:flex;gap:8px">
+            <input class="form-input" id="slugUrl" readonly>
+            <button class="btn btn-secondary" onclick="copySlug()">复制</button>
+          </div>
+          <div id="validation" style="margin-top:20px"></div>
+        </div>
+        <div>
+          <div class="form-label">第三方平台订阅链接</div>
+          <div id="linksArea" class="empty">加载中...</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2 class="card-title">订阅者管理</h2>
+        <a class="btn btn-sm btn-secondary" id="exportBtn" href="#">导出 CSV</a>
+      </div>
+      <table class="table"><thead><tr><th>邮箱</th><th>来源</th><th>IP</th><th>地区</th><th>订阅时间</th><th>操作</th></tr></thead>
+      <tbody id="subTbody"><tr><td colspan="6" class="empty">加载中...</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+requireAuth();
+renderNav("rss-view");
+let curChannelID = null;
+
+(async function init() {
+  const r = await get("/channels/mine/list?page_size=100");
+  if (r.code === 0) {
+    $("#chSel").innerHTML = '<option value="">选择频道...</option>' +
+      r.data.map(c => `<option value="${c.id}">${escapeHtml(c.title)} (${c.slug})</option>`).join("");
+    const cur = new URLSearchParams(location.search).get("channel");
+    if (cur) { $("#chSel").value = cur; main(); }
+    else if (r.data.length) { $("#chSel").value = r.data[0].id; main(); }
+  }
+})();
+
+async function main() {
+  const id = $("#chSel").value;
+  if (!id) return;
+  curChannelID = id;
+  $("#rssArea").style.display = "block";
+  const rssBase = `${location.origin}/api/v1/channels/${id}/rss`;
+  const ch = await get("/channels/" + id);
+  let slugUrl = "";
+  if (ch.code === 0 && ch.data.slug) slugUrl = `${location.origin}/rss/${ch.data.slug}.xml`;
+  $("#rssUrl").value = rssBase;
+  $("#slugUrl").value = slugUrl;
+  $("#rssOpenBtn").href = rssBase;
+  $("#exportBtn").href = `/api/v1/channels/${id}/subscribers/export`;
+  $("#exportBtn").onclick = function(e) {
+    e.preventDefault();
+    fetch(this.href, {headers: headers()}).then(r => r.blob()).then(b => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(b); a.download = "subscribers.csv"; a.click();
+    });
+  };
+
+  const v = await get(`/channels/${id}/rss/validate`);
+  if (v.code === 0) {
+    const issues = v.data.issues || [];
+    $("#validation").innerHTML = v.data.valid
+      ? `<div class="alert alert-success">✅ RSS 校验通过，符合 iTunes 标准</div>`
+      : `<div class="alert alert-error">⚠️ 发现 ${issues.length} 个问题：<ul style="margin:8px 0 0 18px">${issues.map(i=>`<li>${escapeHtml(i)}</li>`).join("")}</ul></div>`;
+  }
+
+  const lk = await get(`/channels/${id}/rss/links`);
+  if (lk.code === 0) {
+    const data = lk.data;
+    $("#linksArea").className = "grid grid-2";
+    $("#linksArea").innerHTML = Object.entries(data).map(([k, u]) => `
+      <a class="btn btn-secondary" style="text-align:left;padding:16px" href="${u}" target="_blank">
+        <div style="font-weight:600">${escapeHtml(linkName(k))}</div>
+        <div style="color:var(--muted);font-size:12px;margin-top:4px;word-break:break-all">${escapeHtml(u)}</div>
+      </a>`).join("");
+  }
+  const sub = await get(`/channels/${id}/subscribers`);
+  if (sub.code === 0) {
+    $("#subTbody").innerHTML = sub.data.length ? sub.data.map(s => `
+      <tr><td>${escapeHtml(s.email||"-")}</td><td>${escapeHtml(s.source||"-")}</td>
+      <td>${escapeHtml(s.ip_address||"-")}</td><td>${escapeHtml(s.country||s.region||"-")}</td>
+      <td>${formatDate(s.created_at)}</td>
+      <td>${s.status===1?"<span class='badge badge-approved'>已订阅</span>":"<span class='badge badge-draft'>已退订</span>"}</td>
+      </tr>`).join("") : `<tr><td colspan="6" class="empty">暂无订阅者</td></tr>`;
+  }
+}
+
+function linkName(k) {
+  const m = { rss:"RSS 2.0 Feed", itunes:"Apple Podcasts", spotify:"Spotify", google:"Google Podcasts", castbox:"Castbox", pocketcasts:"Pocket Casts", overcast:"Overcast" };
+  return m[k] || k;
+}
+function copyUrl() { $("#rssUrl").select(); document.execCommand("copy"); toast("已复制 RSS 链接"); }
+function copySlug() { $("#slugUrl").select(); document.execCommand("copy"); toast("已复制 Slug 链接"); }
+
+async function refreshFeed() {
+  if (!curChannelID) return;
+  const r = await post(`/channels/${curChannelID}/rss/refresh`, {});
+  if (r.code === 0) toast("RSS 缓存已刷新", "success"); else toast(r.message, "error");
+}
+</script>
+</body>
+</html>
