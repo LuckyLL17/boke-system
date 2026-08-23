@@ -3,6 +3,7 @@ package rss
 import (
 	"encoding/xml"
 	"fmt"
+	"strings"
 	"time"
 
 	"podcast-platform/internal/domain"
@@ -122,7 +123,7 @@ func (g *Generator) GenerateFeed(channel *domain.Channel, episodes []domain.Epis
 
 	rssChannel := RSSChannel{
 		Title:         utils.EscapeXML(channel.Title),
-		Link:          baseSiteURL,
+		Link:          resolveChannelURL(baseSiteURL, channel.Slug),
 		Description:   utils.EscapeXML(channel.Description),
 		Language:      channel.Language,
 		Copyright:     utils.EscapeXML(channel.Copyright),
@@ -140,7 +141,7 @@ func (g *Generator) GenerateFeed(channel *domain.Channel, episodes []domain.Epis
 	}
 
 	if channel.CoverImageURL != "" {
-		coverURL := resolveURL(g.BaseURL, channel.CoverImageURL)
+		coverURL := resolveURL(baseSiteURL, channel.CoverImageURL)
 		rssChannel.Image = RSSImage{
 			URL:   coverURL,
 			Title: rssChannel.Title,
@@ -163,7 +164,7 @@ func (g *Generator) GenerateFeed(channel *domain.Channel, episodes []domain.Epis
 	rssChannel.Items = make([]RSSEpisode, 0, len(episodes))
 	for i := range episodes {
 		ep := &episodes[i]
-		item := g.generateEpisode(ep, channel, g.BaseURL)
+		item := g.generateEpisode(ep, channel, baseSiteURL)
 		rssChannel.Items = append(rssChannel.Items, item)
 	}
 
@@ -174,10 +175,12 @@ func (g *Generator) GenerateFeed(channel *domain.Channel, episodes []domain.Epis
 }
 
 func (g *Generator) generateEpisode(ep *domain.Episode, channel *domain.Channel, siteURL string) RSSEpisode {
+	channelBase := resolveChannelURL(siteURL, channel.Slug)
+	episodeURL := fmt.Sprintf("%s/episode/%d", channelBase, ep.ID)
 	item := RSSEpisode{
 		Title:       utils.EscapeXML(ep.Title),
-		Link:        fmt.Sprintf("%s/episode/%d", siteURL, ep.ID),
-		GUID:        fmt.Sprintf("%s/episode/%d", siteURL, ep.ID),
+		Link:        episodeURL,
+		GUID:        episodeURL,
 		Description: utils.EscapeXML(ep.Description),
 		Explicit:    boolToYesNo(ep.Explicit),
 		EpisodeType: "full",
@@ -206,13 +209,13 @@ func (g *Generator) generateEpisode(ep *domain.Episode, channel *domain.Channel,
 	}
 
 	if ep.CoverImageURL != "" {
-		item.Image = ItunesImage{Href: resolveURL(g.BaseURL, ep.CoverImageURL)}
+		item.Image = ItunesImage{Href: resolveURL(siteURL, ep.CoverImageURL)}
 	} else if channel.CoverImageURL != "" {
-		item.Image = ItunesImage{Href: resolveURL(g.BaseURL, channel.CoverImageURL)}
+		item.Image = ItunesImage{Href: resolveURL(siteURL, channel.CoverImageURL)}
 	}
 
 	item.Enclosure = RSSEpisodeEnclosure{
-		URL:    resolveURL(g.BaseURL, ep.AudioFileURL),
+		URL:    resolveURL(siteURL, ep.AudioFileURL),
 		Length: ep.AudioFileSize,
 		Type:   ep.MimeType,
 	}
@@ -256,6 +259,14 @@ func resolveURL(base, path string) string {
 		return base[:len(base)-1] + path
 	}
 	return base + path
+}
+
+func resolveChannelURL(base, slug string) string {
+	trimmed := strings.TrimRight(base, "/")
+	if slug == "" {
+		return trimmed
+	}
+	return trimmed + "/channels/" + slug
 }
 
 func boolToYesNo(b bool) string {

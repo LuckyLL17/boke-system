@@ -18,6 +18,8 @@ type RSSService struct {
 	generator   *pkgRss.Generator
 	cache       map[uint64]*RSSCache
 	cacheMu     sync.RWMutex
+	refreshMu   map[uint64]*sync.Mutex
+	refreshMuMu sync.Mutex
 	baseSiteURL string
 }
 
@@ -33,8 +35,20 @@ func NewRSSService(channelRepo *repository.ChannelRepository, episodeRepo *repos
 		episodeRepo: episodeRepo,
 		generator:   pkgRss.NewGenerator(baseURL),
 		cache:       make(map[uint64]*RSSCache),
+		refreshMu:   make(map[uint64]*sync.Mutex),
 		baseSiteURL: baseURL,
 	}
+}
+
+func (s *RSSService) lockForChannel(channelID uint64) *sync.Mutex {
+	s.refreshMuMu.Lock()
+	defer s.refreshMuMu.Unlock()
+	mu, ok := s.refreshMu[channelID]
+	if !ok {
+		mu = &sync.Mutex{}
+		s.refreshMu[channelID] = mu
+	}
+	return mu
 }
 
 func (s *RSSService) GenerateFeed(channelID uint64, useCache bool) (string, error) {
@@ -47,6 +61,16 @@ func (s *RSSService) GenerateFeed(channelID uint64, useCache bool) (string, erro
 		}
 		s.cacheMu.RUnlock()
 	}
+	mu := s.lockForChannel(channelID)
+	mu.Lock()
+	defer mu.Unlock()
+	s.cacheMu.RLock()
+	if cached, ok := s.cache[channelID]; ok && cached.ExpiresAt.After(time.Now()) {
+		content := cached.Content
+		s.cacheMu.RUnlock()
+		return content, nil
+	}
+	s.cacheMu.RUnlock()
 	ch, err := s.channelRepo.GetByID(channelID)
 	if err != nil {
 		return "", appErr.ErrChannelNotFound
@@ -78,11 +102,13 @@ func (s *RSSService) GenerateFeed(channelID uint64, useCache bool) (string, erro
 
 func (s *RSSService) InvalidateCache(channelID uint64) {
 	s.cacheMu.Lock()
-	if cached, ok := s.cache[channelID]; ok {
-		cached.ExpiresAt = time.Now().Add(time.Hour)
-		s.cache[channelID] = cached
-	}
+	delete(s.cache, channelID)
 	s.cacheMu.Unlock()
+}
+
+func (s *RSSService) RefreshCache(channelID uint64) (string, error) {
+	s.InvalidateCache(channelID)
+	return s.GenerateFeed(channelID, false)
 }
 
 func (s *RSSService) RefreshAllCaches() (int, error) {
@@ -92,7 +118,7 @@ func (s *RSSService) RefreshAllCaches() (int, error) {
 	}
 	count := 0
 	for _, id := range ids {
-		if _, err := s.GenerateFeed(id, false); err == nil {
+		if _, err := s.RefreshCache(id); err == nil {
 			count++
 		}
 	}

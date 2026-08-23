@@ -88,9 +88,7 @@ func (h *RSSHandler) SubscribeLinks(c *gin.Context) {
 
 func (h *RSSHandler) RefreshCache(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	h.rssSvc.InvalidateCache(id)
-	_, err := h.rssSvc.GenerateFeed(id, false)
-	if err != nil {
+	if _, err := h.rssSvc.RefreshCache(id); err != nil {
 		ae, _ := appErr.As(err)
 		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
 		return

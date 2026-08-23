@@ -66,15 +66,14 @@ func NewFeedRefreshHandler(cRepo *repository.ChannelRepository, rssSvc *service.
 func (h *FeedRefreshHandler) Name() string { return "refresh-rss-cache" }
 
 func (h *FeedRefreshHandler) Run(ctx context.Context) error {
-	channels, _, err := h.channelRepo.ListAll(1, 10000, "", nil)
+	ids, err := h.channelRepo.GetAllIDs(10000)
 	if err != nil {
 		return err
 	}
 	refreshed := 0
-	for _, ch := range channels {
-		h.rssSvc.InvalidateCache(ch.ID)
-		if _, err := h.rssSvc.GenerateFeed(ch.ID, false); err != nil {
-			h.logger.Errorf("[rss-refresh] channel %d failed: %v", ch.ID, err)
+	for _, id := range ids {
+		if _, err := h.rssSvc.RefreshCache(id); err != nil {
+			h.logger.Errorf("[rss-refresh] channel %d failed: %v", id, err)
 			continue
 		}
 		refreshed++
