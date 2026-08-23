@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>注册 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+<div class="auth-card">
+  <h1>创建账号</h1>
+  <p>注册开始你的播客之旅</p>
+  <div id="msg"></div>
+  <form id="regForm">
+    <div class="form-group">
+      <label class="form-label">用户名</label>
+      <input class="form-input" name="username" required minlength="3" maxlength="32">
+    </div>
+    <div class="form-group">
+      <label class="form-label">昵称</label>
+      <input class="form-input" name="nickname" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">邮箱</label>
+      <input class="form-input" type="email" name="email" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">密码</label>
+      <input class="form-input" type="password" name="password" required minlength="6">
+    </div>
+    <button class="btn btn-primary btn-block btn-lg" type="submit">注 册</button>
+  </form>
+  <p style="text-align:center;margin-top:24px">
+    已有账号？<a href="/login">去登录</a>
+  </p>
+</div>
+</div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+$("#regForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target;
+  const d = await post("/auth/register", {
+    username: f.username.value.trim(),
+    nickname: f.nickname.value.trim(),
+    email: f.email.value.trim(),
+    password: f.password.value,
+  });
+  if (d.code === 0) {
+    toast("注册成功，请登录", "success");
+    setTimeout(() => location.href = "/login", 800);
+  } else {
+    $("#msg").innerHTML = `<div class="alert alert-error">${escapeHtml(d.message)}</div>`;
+  }
+});
+</script>
+</body>
+</html>
