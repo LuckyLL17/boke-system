@@ -159,9 +159,13 @@ func (s *AudioService) UploadChunked(fileHeader *multipart.FileHeader, chunkInde
 		return false, "", appErr.Wrap(err, 500, "create chunk")
 	}
 	defer dst.Close()
-	_, err = io.Copy(dst, src)
-	if err != nil {
+	if _, err := io.Copy(dst, src); err != nil {
+		_ = os.Remove(chunkPath)
 		return false, "", appErr.Wrap(err, 500, "write chunk")
+	}
+	if err := dst.Sync(); err != nil {
+		_ = os.Remove(chunkPath)
+		return false, "", appErr.Wrap(err, 500, "sync chunk")
 	}
 
 	if chunkIndex+1 >= totalChunks {
@@ -173,16 +177,29 @@ func (s *AudioService) UploadChunked(fileHeader *multipart.FileHeader, chunkInde
 func (s *AudioService) MergeChunks(tempDir, originalName string) (*UploadResult, error) {
 	audioDir := utils.GenerateDatePath(filepath.Join(config.AppConfig.Storage.Local.Path, "audio"))
 	if err := utils.EnsureDir(audioDir); err != nil {
+		_ = utils.RemoveFile(tempDir)
 		return nil, appErr.Wrap(err, 500, "audio dir")
 	}
 	dstName := utils.GenerateFileName(originalName)
 	dstPath := filepath.Join(audioDir, dstName)
+
+	cleanupTemp := true
+	defer func() {
+		if cleanupTemp {
+			_ = utils.RemoveFile(tempDir)
+		}
+	}()
+
 	dst, err := os.Create(dstPath)
 	if err != nil {
 		return nil, appErr.Wrap(err, 500, "create merged")
 	}
-	defer dst.Close()
-	defer utils.RemoveFile(tempDir)
+	dstClosed := false
+	defer func() {
+		if !dstClosed {
+			dst.Close()
+		}
+	}()
 
 	files, _ := filepath.Glob(filepath.Join(tempDir, "*.part"))
 	for i := 0; i < len(files); i++ {
@@ -192,12 +209,24 @@ func (s *AudioService) MergeChunks(tempDir, originalName string) (*UploadResult,
 		}
 		part, err := os.Open(p)
 		if err != nil {
-			continue
+			_ = utils.RemoveFile(dstPath)
+			return nil, appErr.Wrap(err, 500, "open chunk")
 		}
-		_, _ = io.Copy(dst, part)
+		if _, err := io.Copy(dst, part); err != nil {
+			part.Close()
+			_ = utils.RemoveFile(dstPath)
+			return nil, appErr.Wrap(err, 500, "merge chunk")
+		}
 		part.Close()
 		_ = os.Remove(p)
 	}
+
+	if err := dst.Sync(); err != nil {
+		_ = utils.RemoveFile(dstPath)
+		return nil, appErr.Wrap(err, 500, "sync merged")
+	}
+	dst.Close()
+	dstClosed = true
 
 	size, _ := utils.FileSize(dstPath)
 	relPath, _ := filepath.Rel(config.AppConfig.Storage.Local.Path, dstPath)
@@ -210,7 +239,10 @@ func (s *AudioService) MergeChunks(tempDir, originalName string) (*UploadResult,
 		MimeType:     s.processor.GetMimeType(utils.GetExt(originalName)),
 	}
 	if s.processor.Available() {
-		if info, err := s.processor.GetAudioInfo(dstPath); err == nil {
+		info, err := s.processor.GetAudioInfo(dstPath)
+		if err != nil {
+			logger.Warnf("ffprobe failed for %s: %v", dstPath, err)
+		} else if info != nil {
 			result.Duration = info.Duration
 			result.SampleRate = info.SampleRate
 			result.BitRate = info.BitRate

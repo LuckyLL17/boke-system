@@ -11,7 +11,6 @@ import (
 	"podcast-platform/internal/middleware"
 	"podcast-platform/internal/service"
 	appErr "podcast-platform/pkg/errors"
-	"podcast-platform/pkg/utils"
 )
 
 type EpisodeHandler struct {
@@ -80,7 +79,6 @@ func (h *EpisodeHandler) UploadChunk(c *gin.Context) {
 		}
 		result, err := h.audioSvc.MergeChunks(tempDir, origName)
 		if err != nil {
-			_ = utils.RemoveFile(tempDir)
 			ae, _ := appErr.As(err)
 			c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
 			return

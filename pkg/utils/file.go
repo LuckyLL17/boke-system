@@ -85,8 +85,11 @@ func IsAudioFile(name string) bool {
 }
 
 func RemoveFile(path string) error {
-	if FileExists(path) {
+	if _, err := os.Stat(path); err == nil {
+		return os.RemoveAll(path)
+	} else if os.IsNotExist(err) {
 		return nil
+	} else {
+		return err
 	}
-	return nil
 }
