@@ -52,20 +52,35 @@ func (r *ChapterRepository) DeleteByEpisode(episodeID uint64) error {
 	return r.db.Where("episode_id = ?", episodeID).Delete(&domain.Chapter{}).Error
 }
 
+// ReplaceByEpisode replaces all chapters for an episode atomically: existing
+// rows are deleted and the supplied chapters (if any) are inserted in the same
+// transaction. An empty slice is a legitimate value that clears all chapters.
 func (r *ChapterRepository) ReplaceByEpisode(episodeID uint64, chapters []domain.Chapter) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := r.db.Where("episode_id = ?", episodeID).Delete(&domain.Chapter{}).Error; err != nil {
-			return err
-		}
-		if len(chapters) > 0 {
-			for i := range chapters {
-				chapters[i].EpisodeID = episodeID
-			}
-			if err := r.db.Create(&chapters).Error; err != nil {
-				return err
-			}
-			return nil
-		}
-		return nil
+		return r.ReplaceByEpisodeTx(tx, episodeID, chapters)
 	})
+}
+
+// ReplaceByEpisodeTx performs the same replacement as ReplaceByEpisode but on
+// an existing transaction/connection handle, so callers can fold the chapter
+// rewrite into a larger atomic unit of work.
+func (r *ChapterRepository) ReplaceByEpisodeTx(tx *gorm.DB, episodeID uint64, chapters []domain.Chapter) error {
+	if tx == nil {
+		tx = r.db
+	}
+	if err := tx.Where("episode_id = ?", episodeID).Delete(&domain.Chapter{}).Error; err != nil {
+		return err
+	}
+	if len(chapters) == 0 {
+		return nil
+	}
+	for i := range chapters {
+		chapters[i].ID = 0
+		chapters[i].EpisodeID = episodeID
+		chapters[i].SortOrder = i
+	}
+	if err := tx.Create(&chapters).Error; err != nil {
+		return err
+	}
+	return nil
 }

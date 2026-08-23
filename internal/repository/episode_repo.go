@@ -33,6 +33,21 @@ func (r *EpisodeRepository) Update(ep *domain.Episode) error {
 	return r.db.Save(ep).Error
 }
 
+// Transaction runs fn inside a database transaction, passing the scoped
+// connection so callers can execute multiple repository operations atomically.
+func (r *EpisodeRepository) Transaction(fn func(tx *gorm.DB) error) error {
+	return r.db.Transaction(fn)
+}
+
+// UpdateTx saves the episode on an existing transaction/connection handle,
+// enabling callers to fold the episode update into a larger atomic unit of work.
+func (r *EpisodeRepository) UpdateTx(tx *gorm.DB, ep *domain.Episode) error {
+	if tx == nil {
+		tx = r.db
+	}
+	return tx.Save(ep).Error
+}
+
 func (r *EpisodeRepository) Delete(id uint64) error {
 	return r.db.Delete(&domain.Episode{}, id).Error
 }

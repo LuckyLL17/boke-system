@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
+	"gorm.io/gorm"
+
 	"podcast-platform/internal/domain"
 	"podcast-platform/internal/repository"
 	appErr "podcast-platform/pkg/errors"
@@ -191,21 +193,25 @@ func (s *EpisodeService) Update(id, ownerID uint64, req *UpdateEpisodeRequest) (
 	if req.Tags != "" {
 		ep.Tags = req.Tags
 	}
-	if err := s.episodeRepo.Update(ep); err != nil {
-		return nil, appErr.Wrap(err, 500, "update failed")
-	}
-	chapters := req.Chapters
-	if len(chapters) == 0 && req.ChaptersJSON != "" {
-		var chs []domain.Chapter
-		if json.Unmarshal([]byte(req.ChaptersJSON), &chs) == nil {
-			chapters = chs
+	if err := s.episodeRepo.Transaction(func(tx *gorm.DB) error {
+		if err := s.episodeRepo.UpdateTx(tx, ep); err != nil {
+			return appErr.Wrap(err, 500, "update failed")
 		}
-	}
-	if len(chapters) > 0 {
-		for i := range chapters {
-			chapters[i].ID = 0
+		// A non-empty ChaptersJSON signals that the caller is updating the
+		// chapter list. An empty list ("[]") is a legitimate value that clears
+		// all existing chapters — it must still be forwarded to the replace
+		// step instead of being treated as "no change".
+		if req.ChaptersJSON != "" {
+			var chs []domain.Chapter
+			if json.Unmarshal([]byte(req.ChaptersJSON), &chs) == nil {
+				if err := s.chapterRepo.ReplaceByEpisodeTx(tx, ep.ID, chs); err != nil {
+					return appErr.Wrap(err, 500, "replace chapters failed")
+				}
+			}
 		}
-		_ = s.chapterRepo.ReplaceByEpisode(ep.ID, chapters)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return ep, nil
 }
