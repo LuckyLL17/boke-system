@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>数据统计 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+<style>
+.chart-area{display:flex;align-items:flex-end;gap:8px;height:240px;padding:20px 0;border-bottom:1px solid var(--border);overflow-x:auto}
+.chart-bar{flex:1;min-width:32px;display:flex;flex-direction:column;align-items:center;gap:6px}
+.chart-fill{width:100%;background:linear-gradient(180deg,#818cf8,#6366f1);border-radius:4px 4px 0 0;min-height:2px;position:relative;transition:height .5s}
+.chart-fill:hover{opacity:.8}
+.chart-fill::after{content:attr(data-val);position:absolute;top:-22px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--muted);font-weight:500;white-space:nowrap}
+.chart-label{font-size:11px;color:var(--muted);writing-mode:vertical-lr;transform:rotate(180deg);white-space:nowrap;margin-top:6px}
+</style>
+</head>
+<body>
+<nav class="navbar"><div class="navbar-inner">
+  <a href="/dashboard" class="logo">🎙️ Podcast Admin</a>
+  <div class="nav-links"></div>
+</div></nav>
+<div class="container page">
+  <h1 class="page-title">数据统计</h1>
+  <p class="page-sub">收听数据、趋势分析与完播情况</p>
+  <div class="card">
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <select class="form-select" id="chSel" style="max-width:260px" onchange="main()"><option value="">选择频道...</option></select>
+      <select class="form-select" id="rng" style="max-width:160px" onchange="main()">
+        <option value="7d">近 7 天</option>
+        <option value="30d" selected>近 30 天</option>
+        <option value="90d">近 90 天</option>
+        <option value="1y">近 1 年</option>
+      </select>
+    </div>
+  </div>
+  <div id="stArea">
+    <div class="grid grid-4" id="cardGrid">
+      <div class="stat-card"><div class="stat-label">总播放</div><div class="stat-value">-</div></div>
+      <div class="stat-card"><div class="stat-label">独立听众</div><div class="stat-value">-</div></div>
+      <div class="stat-card"><div class="stat-label">平均时长</div><div class="stat-value">-</div></div>
+      <div class="stat-card"><div class="stat-label">完播率</div><div class="stat-value">-</div></div>
+    </div>
+    <div class="card" style="margin-top:24px">
+      <div class="card-header"><h2 class="card-title">播放趋势</h2></div>
+      <div class="chart-area" id="chart"></div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2 class="card-title">热门节目 TOP 10</h2></div>
+      <table class="table"><thead><tr><th>#</th><th>节目</th><th>播放</th><th>独立听众</th><th>平均进度</th></tr></thead>
+      <tbody id="topTbody"><tr><td colspan="5" class="empty">请选择频道</td></tr></tbody></table>
+    </div>
+  </div>
+</div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+requireAuth();
+renderNav("stats");
+
+(async function init() {
+  const r = await get("/channels/mine/list?page_size=100");
+  if (r.code === 0) {
+    $("#chSel").innerHTML = '<option value="">选择频道...</option>' +
+      r.data.map(c => `<option value="${c.id}">${escapeHtml(c.title)}</option>`).join("");
+    const cur = new URLSearchParams(location.search).get("channel");
+    if (cur) { $("#chSel").value = cur; main(); return; }
+    if (r.data.length) { $("#chSel").value = r.data[0].id; main(); }
+  }
+})();
+
+async function main() {
+  const ch = $("#chSel").value;
+  const rng = $("#rng").value;
+  if (!ch) { $("#topTbody").innerHTML = `<tr><td colspan="5" class="empty">请选择频道</td></tr>`; return; }
+  const d = await get(`/channels/${ch}/stats` + qs({range:rng}));
+  if (d.code !== 0) { toast(d.message, "error"); return; }
+  const s = d.data;
+  $("#cardGrid").innerHTML = `
+    <div class="stat-card"><div class="stat-label">总播放</div><div class="stat-value">${s.total_playbacks||0}</div><div class="stat-delta up">avg ${s.daily_avg||0}/天</div></div>
+    <div class="stat-card"><div class="stat-label">独立听众</div><div class="stat-value">${s.unique_listeners||0}</div></div>
+    <div class="stat-card"><div class="stat-label">平均收听时长</div><div class="stat-value">${formatDuration(s.avg_listen_seconds)}</div></div>
+    <div class="stat-card"><div class="stat-label">平均完播率</div><div class="stat-value">${Math.round(s.avg_completion_rate||0)}%</div></div>
+  `;
+  const trend = s.trend || [];
+  const max = Math.max(...trend.map(t=>t.playbacks||0), 1);
+  $("#chart").innerHTML = trend.length ? trend.map(t => {
+    const h = Math.round((t.playbacks||0) / max * 200);
+    return `<div class="chart-bar"><div class="chart-fill" style="height:${h}px" data-val="${t.playbacks||0}"></div><div class="chart-label">${(t.date||"").slice(5)}</div></div>`;
+  }).join("") : '<div style="color:var(--muted);padding:60px 0;text-align:center;width:100%">暂无数据</div>';
+  const top = s.top_episodes || [];
+  $("#topTbody").innerHTML = top.length ? top.map((e, i) => `
+    <tr>
+      <td>${i+1}</td>
+      <td><a href="/player?id=${e.id}">${escapeHtml(e.title)}</a></td>
+      <td>${e.play_count||0}</td>
+      <td>${e.unique_listeners||0}</td>
+      <td><div style="display:flex;align-items:center;gap:8px">
+          <div class="progress" style="width:80px"><div class="progress-bar" style="width:${e.avg_progress||0}%"></div></div>
+          <span>${Math.round(e.avg_progress||0)}%</span>
+        </div></td>
+    </tr>`).join("") : `<tr><td colspan="5" class="empty">暂无数据</td></tr>`;
+}
+</script>
+</body>
+</html>

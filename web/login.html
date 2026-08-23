@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+</head>
+<body>
+<div class="auth-wrap">
+<div class="auth-card">
+  <h1>欢迎回来</h1>
+  <p>登录你的播客管理账号</p>
+  <div id="msg"></div>
+  <form id="loginForm">
+    <div class="form-group">
+      <label class="form-label">用户名 / 邮箱</label>
+      <input class="form-input" name="username" required autofocus placeholder="admin">
+    </div>
+    <div class="form-group">
+      <label class="form-label">密码</label>
+      <input class="form-input" type="password" name="password" required placeholder="admin123">
+    </div>
+    <button class="btn btn-primary btn-block btn-lg" type="submit">登 录</button>
+  </form>
+  <p style="text-align:center;margin-top:24px">
+    还没有账号？<a href="/register">立即注册</a>
+  </p>
+  <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:12px">
+    默认管理员: admin / admin123
+  </p>
+</div>
+</div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+$("#loginForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target;
+  const d = await post("/auth/login", {
+    username: f.username.value.trim(),
+    password: f.password.value,
+  });
+  if (d.code === 0) {
+    setToken(d.data.token);
+    const me = await get("/auth/me");
+    if (me.code === 0) setUser(me.data);
+    location.href = "/dashboard";
+  } else {
+    $("#msg").innerHTML = `<div class="alert alert-error">${escapeHtml(d.message)}</div>`;
+  }
+});
+</script>
+</body>
+</html>
