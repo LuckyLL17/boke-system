@@ -1,10 +1,12 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 
 	"podcast-platform/config"
 	"podcast-platform/internal/domain"
@@ -142,7 +144,10 @@ func (s *AuthService) ValidateToken(tokenStr string) (*JWTClaims, error) {
 func (s *AuthService) GetUserByID(id uint64) (*domain.User, error) {
 	user, err := s.userRepo.GetByID(id)
 	if err != nil {
-		return nil, appErr.ErrUserNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErr.ErrUserNotFound
+		}
+		return nil, appErr.Wrap(err, 500, "get user failed")
 	}
 	return user, nil
 }
@@ -150,7 +155,10 @@ func (s *AuthService) GetUserByID(id uint64) (*domain.User, error) {
 func (s *AuthService) ChangePassword(userID uint64, oldPwd, newPwd string) error {
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
-		return appErr.ErrUserNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return appErr.ErrUserNotFound
+		}
+		return appErr.Wrap(err, 500, "get user failed")
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(oldPwd)); err != nil {
 		return appErr.ErrInvalidPassword
@@ -160,13 +168,19 @@ func (s *AuthService) ChangePassword(userID uint64, oldPwd, newPwd string) error
 		return appErr.Wrap(err, 500, "hash password failed")
 	}
 	user.PasswordHash = string(hash)
-	return s.userRepo.Update(user)
+	if err := s.userRepo.Update(user); err != nil {
+		return appErr.Wrap(err, 500, "update password failed")
+	}
+	return nil
 }
 
 func (s *AuthService) UpdateProfile(userID uint64, nickname, avatarURL string) (*domain.User, error) {
 	user, err := s.userRepo.GetByID(userID)
 	if err != nil {
-		return nil, appErr.ErrUserNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, appErr.ErrUserNotFound
+		}
+		return nil, appErr.Wrap(err, 500, "get user failed")
 	}
 	if nickname != "" {
 		user.Nickname = nickname
@@ -175,7 +189,7 @@ func (s *AuthService) UpdateProfile(userID uint64, nickname, avatarURL string) (
 		user.AvatarURL = avatarURL
 	}
 	if err := s.userRepo.Update(user); err != nil {
-		return nil, err
+		return nil, appErr.Wrap(err, 500, "update profile failed")
 	}
 	return user, nil
 }

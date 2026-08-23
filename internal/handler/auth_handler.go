@@ -33,12 +33,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 	user, err := h.authSvc.Register(req)
 	if err != nil {
-		ae, ok := appErr.As(err)
-		if ok {
-			c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
-			return
-		}
-		c.JSON(http.StatusInternalServerError, dto.Err(500, err.Error()))
+		writeAppError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.OK(user.ToProfile()))
@@ -56,12 +51,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 	resp, err := h.authSvc.Login(req)
 	if err != nil {
-		ae, ok := appErr.As(err)
-		if ok {
-			c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
-			return
-		}
-		c.JSON(http.StatusInternalServerError, dto.Err(500, err.Error()))
+		writeAppError(c, err)
 		return
 	}
 	c.SetCookie("token", resp.Token, 3600*24, "/", "", false, true)
@@ -77,11 +67,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	user, err := h.authSvc.GetUserByID(userID)
 	if err != nil {
-		ae, ok := appErr.As(err)
-		if !ok {
-			panic(err)
-		}
-		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
+		writeAppError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.OK(user.ToProfile()))
@@ -95,8 +81,7 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 	}
 	userID := middleware.GetUserID(c)
 	if err := h.authSvc.ChangePassword(userID, body.OldPassword, body.NewPassword); err != nil {
-		ae, _ := appErr.As(err)
-		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
+		writeAppError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.OK(nil))
@@ -111,9 +96,20 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	userID := middleware.GetUserID(c)
 	user, err := h.authSvc.UpdateProfile(userID, body.Nickname, body.AvatarURL)
 	if err != nil {
-		ae, _ := appErr.As(err)
-		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
+		writeAppError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.OK(user.ToProfile()))
+}
+
+func writeAppError(c *gin.Context, err error) {
+	if err == nil {
+		c.JSON(http.StatusInternalServerError, dto.Err(500, "internal server error"))
+		return
+	}
+	if ae, ok := appErr.As(err); ok && ae != nil {
+		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
+		return
+	}
+	c.JSON(http.StatusInternalServerError, dto.Err(500, "internal server error"))
 }

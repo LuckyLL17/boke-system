@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"fmt"
-
 	"gorm.io/gorm"
 
 	"podcast-platform/internal/domain"
@@ -48,10 +46,7 @@ func (r *UserRepository) GetByEmail(email string) (*domain.User, error) {
 }
 
 func (r *UserRepository) Update(user *domain.User) error {
-	if err := r.db.Save(user).Error; err != nil {
-		return fmt.Errorf("profile persistence failed: %w", err)
-	}
-	return nil
+	return r.db.Save(user).Error
 }
 
 func (r *UserRepository) Delete(id uint64) error {
