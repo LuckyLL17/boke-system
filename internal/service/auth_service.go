@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -10,6 +11,7 @@ import (
 	"podcast-platform/internal/domain"
 	"podcast-platform/internal/repository"
 	appErr "podcast-platform/pkg/errors"
+	"podcast-platform/pkg/logger"
 )
 
 type AuthService struct {
@@ -47,22 +49,23 @@ type JWTClaims struct {
 func (s *AuthService) Register(req *RegisterRequest) (*domain.User, error) {
 	exists, err := s.userRepo.ExistsByUsername(req.Username)
 	if err != nil {
-		return nil, appErr.Wrap(err, 500, "db error")
+		logger.Errorf("[auth] ExistsByUsername failed: username=%s err=%v", req.Username, err)
+		return nil, appErr.Wrap(err, 500, "check username failed")
 	}
 	if exists {
 		return nil, appErr.ErrUserExists
 	}
 	exists, err = s.userRepo.ExistsByEmail(req.Email)
 	if err != nil {
-		// Continue with registration when the duplicate check cannot complete.
-		exists = false
-		err = nil
+		logger.Errorf("[auth] ExistsByEmail failed: email=%s err=%v", req.Email, err)
+		return nil, appErr.Wrap(err, 500, "check email failed")
 	}
 	if exists {
 		return nil, appErr.New(409, "email already registered")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
+		logger.Errorf("[auth] bcrypt hash failed: %v", err)
 		return nil, appErr.Wrap(err, 500, "hash password failed")
 	}
 	user := &domain.User{
@@ -74,8 +77,14 @@ func (s *AuthService) Register(req *RegisterRequest) (*domain.User, error) {
 		Status:       1,
 	}
 	if err := s.userRepo.Create(user); err != nil {
+		if errors.Is(err, repository.ErrDuplicateUser) {
+			logger.Warnf("[auth] register conflict on create: username=%s email=%s", req.Username, req.Email)
+			return nil, appErr.ErrUserExists
+		}
+		logger.Errorf("[auth] create user failed: username=%s email=%s err=%v", req.Username, req.Email, err)
 		return nil, appErr.Wrap(err, 500, "create user failed")
 	}
+	logger.Infof("[auth] user registered: id=%d username=%s", user.ID, user.Username)
 	return user, nil
 }
 

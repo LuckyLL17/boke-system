@@ -9,6 +9,7 @@ import (
 	"podcast-platform/internal/middleware"
 	"podcast-platform/internal/service"
 	appErr "podcast-platform/pkg/errors"
+	"podcast-platform/pkg/logger"
 )
 
 type AuthHandler struct {
@@ -34,11 +35,15 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	user, err := h.authSvc.Register(req)
 	if err != nil {
 		ae, ok := appErr.As(err)
-		if ok {
-			c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
+		if !ok {
+			logger.Errorf("[auth] register unexpected error: username=%s err=%v", body.Username, err)
+			c.JSON(http.StatusInternalServerError, dto.Err(500, "registration failed"))
 			return
 		}
-		c.JSON(http.StatusInternalServerError, dto.Err(500, "registration failed"))
+		if ae.Code >= 500 {
+			logger.Errorf("[auth] register failed: code=%d username=%s err=%v", ae.Code, body.Username, err)
+		}
+		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
 		return
 	}
 	c.JSON(http.StatusOK, dto.OK(user.ToProfile()))
