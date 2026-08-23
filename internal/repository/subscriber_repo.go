@@ -84,16 +84,22 @@ func (r *SubscriberRepository) FindByToken(token string) (*domain.Subscriber, er
 	return &s, nil
 }
 
-func (r *SubscriberRepository) Unsubscribe(id uint64) error {
+// Unsubscribe flips an active subscriber (status 1 -> 0) and records the
+// unsubscribe time. It only acts on rows currently in status 1, so it is
+// idempotent: a repeated call updates nothing. The number of rows actually
+// updated is returned so callers can adjust the denormalized channel counter
+// exactly once per real state transition — never on a no-op.
+// The original subscribed_at is preserved so growth charts stay accurate.
+func (r *SubscriberRepository) Unsubscribe(id uint64) (int64, error) {
 	now := time.Now()
-	return r.db.Model(&domain.Subscriber{}).Where("id = ?", id).
-		Where("status = ?", 1).
+	res := r.db.Model(&domain.Subscriber{}).
+		Where("id = ? AND status = ?", id, 1).
 		Updates(map[string]interface{}{
 			"status":          0,
 			"unsubscribed_at": &now,
-			"subscribed_at":   now,
 			"updated_at":      now,
-		}).Error
+		})
+	return res.RowsAffected, res.Error
 }
 
 func (r *SubscriberRepository) GroupByDate(channelID uint64, from, to time.Time) ([]map[string]interface{}, error) {

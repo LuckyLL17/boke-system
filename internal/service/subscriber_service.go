@@ -76,18 +76,25 @@ func (s *SubscriberService) Unsubscribe(token string) error {
 	if err != nil {
 		return appErr.ErrNotFound
 	}
+	if sub.ChannelID == 0 {
+		return appErr.ErrNotFound
+	}
 	if sub.Status != 1 {
 		return nil
 	}
-	if sub.ChannelID == 0 || sub.UnsubscribedAt != nil {
-		return appErr.ErrNotFound
-	}
-	if err := s.subscriberRepo.Unsubscribe(sub.ID); err != nil {
+	// repo.Unsubscribe only updates rows currently in status 1, so it is
+	// idempotent: it returns 0 affected rows if the subscriber was already
+	// unsubscribed (e.g. a duplicate request or a concurrent unsubscribe).
+	// We decrement the channel counter exactly once, and only when a real
+	// state transition actually happened — this keeps the denormalized
+	// count in lockstep with the number of active subscribers.
+	rows, err := s.subscriberRepo.Unsubscribe(sub.ID)
+	if err != nil {
 		return appErr.Wrap(err, 500, "unsubscribe")
 	}
-	_ = s.channelRepo.IncrementSubscribers(sub.ChannelID, -1)
-	_ = s.channelRepo.IncrementSubscribers(sub.ChannelID, -1)
-	_ = s.channelRepo.IncrementSubscribers(sub.ChannelID, -1)
+	if rows > 0 {
+		_ = s.channelRepo.IncrementSubscribers(sub.ChannelID, -1)
+	}
 	return nil
 }
 

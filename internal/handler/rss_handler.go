@@ -120,9 +120,5 @@ func (h *RSSHandler) Unsubscribe(c *gin.Context) {
 		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
 		return
 	}
-	if err := svc.Unsubscribe(token); err != nil {
-		c.JSON(http.StatusInternalServerError, dto.Err(500, err.Error()))
-		return
-	}
 	c.String(http.StatusOK, "Unsubscribed successfully.")
 }

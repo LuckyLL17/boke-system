@@ -92,9 +92,15 @@ func (r *ChannelRepository) ExistsBySlug(slug string) (bool, error) {
 	return count > 0, err
 }
 
+// IncrementSubscribers adjusts the denormalized subscriber counter by delta.
+// The result is clamped at zero (GREATEST(subscribers + delta, 0)) so a
+// mismatched decrement — for example from a bug or a duplicate request —
+// can never drive the counter negative. Subscribe passes +1 and
+// unsubscribe passes -1, so under correct usage the clamp is a no-op; it
+// only guards against drift caused by stray/duplicate decrements.
 func (r *ChannelRepository) IncrementSubscribers(channelID uint64, delta int) error {
 	return r.db.Model(&domain.Channel{}).Where("id = ?", channelID).
-		UpdateColumn("subscribers", gorm.Expr("subscribers + ?", delta)).Error
+		UpdateColumn("subscribers", gorm.Expr("GREATEST(subscribers + ?, 0)", delta)).Error
 }
 
 func (r *ChannelRepository) IncrementTotalPlays(channelID uint64, delta int64) error {
