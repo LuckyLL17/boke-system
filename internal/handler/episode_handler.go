@@ -82,7 +82,7 @@ func (h *EpisodeHandler) UploadChunk(c *gin.Context) {
 		if origName == "" {
 			origName = fileHeader.Filename
 		}
-		result, err := h.audioSvc.MergeChunks(tempDir, origName)
+		result, err := h.audioSvc.MergeChunks(tempDir, origName, q.TotalChunks, q.UploadID)
 		if err != nil {
 			ae, _ := appErr.As(err)
 			c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
