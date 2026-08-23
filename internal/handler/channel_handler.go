@@ -149,7 +149,12 @@ func (h *ChannelHandler) ListAll(c *gin.Context) {
 func (h *ChannelHandler) Approve(c *gin.Context) {
 	id := h.parseID(c)
 	if err := h.channelSvc.Approve(id); err != nil {
-		c.JSON(http.StatusOK, dto.OK(nil))
+		ae, ok := appErr.As(err)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, dto.Err(500, err.Error()))
+			return
+		}
+		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
 		return
 	}
 	c.JSON(http.StatusOK, dto.OK(nil))
@@ -158,7 +163,12 @@ func (h *ChannelHandler) Approve(c *gin.Context) {
 func (h *ChannelHandler) Reject(c *gin.Context) {
 	id := h.parseID(c)
 	if err := h.channelSvc.Reject(id); err != nil {
-		c.JSON(http.StatusInternalServerError, dto.Err(500, err.Error()))
+		ae, ok := appErr.As(err)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, dto.Err(500, err.Error()))
+			return
+		}
+		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
 		return
 	}
 	c.JSON(http.StatusOK, dto.OK(nil))

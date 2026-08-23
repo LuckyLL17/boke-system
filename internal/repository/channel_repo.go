@@ -104,8 +104,15 @@ func (r *ChannelRepository) IncrementTotalPlays(channelID uint64, delta int64) e
 
 func (r *ChannelRepository) UpdateStatus(id uint64, status domain.ChannelStatus) error {
 	return r.db.Model(&domain.Channel{}).
-		Where("id = ? AND status = ?", id, domain.ChannelPending).
+		Where("id = ?", id).
 		Update("status", status).Error
+}
+
+func (r *ChannelRepository) UpdateStatusFrom(id uint64, from, to domain.ChannelStatus) (int64, error) {
+	res := r.db.Model(&domain.Channel{}).
+		Where("id = ? AND status = ?", id, from).
+		Update("status", to)
+	return res.RowsAffected, res.Error
 }
 
 func (r *ChannelRepository) GetAllIDs(limit int) ([]uint64, error) {

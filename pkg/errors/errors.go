@@ -35,6 +35,7 @@ var (
 	ErrTokenExpired    = New(http.StatusUnauthorized, "token expired")
 	ErrTokenInvalid    = New(http.StatusUnauthorized, "invalid token")
 	ErrChannelNotFound = New(http.StatusNotFound, "channel not found")
+	ErrChannelNotPending = New(http.StatusConflict, "channel is not pending review")
 	ErrEpisodeNotFound = New(http.StatusNotFound, "episode not found")
 	ErrNoPermission    = New(http.StatusForbidden, "no permission")
 	ErrUploadFailed    = New(http.StatusBadRequest, "upload failed")

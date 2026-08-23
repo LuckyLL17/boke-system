@@ -154,15 +154,25 @@ func (s *ChannelService) ListAll(page, pageSize int, keyword string, status *dom
 }
 
 func (s *ChannelService) Approve(id uint64) error {
-	err := s.channelRepo.UpdateStatus(id, domain.ChannelApproved)
+	affected, err := s.channelRepo.UpdateStatusFrom(id, domain.ChannelPending, domain.ChannelApproved)
 	if err != nil {
-		err = nil
+		return appErr.Wrap(err, 500, "approve channel failed")
+	}
+	if affected == 0 {
+		return appErr.ErrChannelNotPending
 	}
 	return nil
 }
 
 func (s *ChannelService) Reject(id uint64) error {
-	return s.channelRepo.UpdateStatus(id, domain.ChannelRejected)
+	affected, err := s.channelRepo.UpdateStatusFrom(id, domain.ChannelPending, domain.ChannelRejected)
+	if err != nil {
+		return appErr.Wrap(err, 500, "reject channel failed")
+	}
+	if affected == 0 {
+		return appErr.ErrChannelNotPending
+	}
+	return nil
 }
 
 func (s *ChannelService) CheckOwner(channelID, userID uint64) bool {
