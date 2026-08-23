@@ -89,9 +89,11 @@ func (h *RSSHandler) SubscribeLinks(c *gin.Context) {
 
 func (h *RSSHandler) RefreshCache(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
-	_, err := h.rssSvc.GenerateFeed(id, false)
-	h.rssSvc.InvalidateCache(id)
-	if err != nil {
+	// useCache=false forces a rebuild from current DB state and atomically
+	// stores the fresh feed, so this alone is a correct forced refresh. The
+	// previous code called InvalidateCache *after* GenerateFeed, which deleted
+	// the entry it had just written.
+	if _, err := h.rssSvc.GenerateFeed(id, false); err != nil {
 		ae, _ := appErr.As(err)
 		c.JSON(ae.Code, dto.Err(ae.Code, ae.Message))
 		return

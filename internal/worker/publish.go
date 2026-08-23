@@ -32,6 +32,7 @@ func (h *PublishHandler) Run(ctx context.Context) error {
 	}
 	h.logger.Infof("[publish] found %d scheduled episodes to publish", len(list))
 	published := 0
+	invalidated := make(map[uint64]struct{})
 	for i := range list {
 		ep := &list[i]
 		if err := h.episodeRepo.UpdateStatus(ep.ID, "published"); err != nil {
@@ -39,7 +40,17 @@ func (h *PublishHandler) Run(ctx context.Context) error {
 			continue
 		}
 		ep.Status = "published"
-		go h.rssSvc.GenerateFeed(ep.ChannelID, false)
+		// Drop the stale (pre-publish) feed cache synchronously. We do NOT
+		// regenerate here: an async rebuild would race the 2-hourly refresh
+		// job and could overwrite it with a snapshot taken before the status
+		// commit. Invalidating the cache (which also bumps the CAS version)
+		// guarantees the next reader — HTTP request or background refresh —
+		// rebuilds from the already-committed published state. Dedupe per
+		// channel so a batch publish only invalidates once.
+		if _, ok := invalidated[ep.ChannelID]; !ok {
+			h.rssSvc.InvalidateCache(ep.ChannelID)
+			invalidated[ep.ChannelID] = struct{}{}
+		}
 		published++
 	}
 	h.logger.Infof("[publish] %d episodes published", published)

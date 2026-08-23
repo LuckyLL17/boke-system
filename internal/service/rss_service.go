@@ -40,9 +40,6 @@ func NewRSSService(channelRepo *repository.ChannelRepository, episodeRepo *repos
 }
 
 func (s *RSSService) GenerateFeed(channelID uint64, useCache bool) (string, error) {
-	s.cacheMu.RLock()
-	version := s.cacheVersion[channelID]
-	s.cacheMu.RUnlock()
 	if useCache {
 		s.cacheMu.RLock()
 		if cached, ok := s.cache[channelID]; ok && cached.ExpiresAt.After(time.Now()) {
@@ -52,6 +49,41 @@ func (s *RSSService) GenerateFeed(channelID uint64, useCache bool) (string, erro
 		}
 		s.cacheMu.RUnlock()
 	}
+	// Rebuild under the write lock so concurrent rebuilds serialize: only one
+	// goroutine builds at a time, the rest wait and then observe the result via
+	// the double-checked cache read below. This closes the read-build-write
+	// window where a stale rebuild could overwrite a fresher writer.
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if useCache {
+		if cached, ok := s.cache[channelID]; ok && cached.ExpiresAt.After(time.Now()) {
+			return cached.Content, nil
+		}
+	}
+	// Snapshot the cache version; if InvalidateCache bumped it while we rebuilt,
+	// another writer (e.g. a scheduled-publish) owns the entry and we must not
+	// clobber it with our possibly-stale snapshot.
+	version := s.cacheVersion[channelID]
+	feed, err := s.buildFeed(channelID)
+	if err != nil {
+		return "", err
+	}
+	if s.cacheVersion[channelID] != version {
+		return feed, nil
+	}
+	ttl := time.Duration(config.AppConfig.Cache.RSSTTL) * time.Second
+	s.cache[channelID] = &RSSCache{
+		Content:   feed,
+		Generated: time.Now(),
+		ExpiresAt: time.Now().Add(ttl),
+	}
+	return feed, nil
+}
+
+// buildFeed reads the channel and its published episodes from the database and
+// renders the RSS XML. It performs no caching and must be called while the
+// caller holds the cache write lock (or with no caching expectations).
+func (s *RSSService) buildFeed(channelID uint64) (string, error) {
 	ch, err := s.channelRepo.GetByID(channelID)
 	if err != nil {
 		return "", appErr.ErrChannelNotFound
@@ -63,31 +95,19 @@ func (s *RSSService) GenerateFeed(channelID uint64, useCache bool) (string, erro
 	if err != nil {
 		return "", appErr.Wrap(err, 500, "load episodes")
 	}
-	feed := s.generator.GenerateFeed(ch, episodes, s.baseSiteURL)
-	ttl := time.Duration(config.AppConfig.Cache.RSSTTL) * time.Second
-	s.cacheMu.Lock()
-	if s.cacheVersion[channelID] != version {
-		s.cacheMu.Unlock()
-		return feed, nil
-	}
-	if len(s.cache) > 1000 {
-		for k := range s.cache {
-			delete(s.cache, k)
-			break
-		}
-	}
-	s.cache[channelID] = &RSSCache{
-		Content:   feed,
-		Generated: time.Now(),
-		ExpiresAt: time.Now().Add(ttl),
-	}
-	s.cacheMu.Unlock()
-	return feed, nil
+	return s.generator.GenerateFeed(ch, episodes, s.baseSiteURL), nil
 }
 
+// InvalidateCache drops the cached feed for a channel and bumps its version.
+// The version bump is what makes the CAS check in GenerateFeed meaningful: any
+// in-flight rebuild that snapshotted the previous version will, on write, see
+// the version changed and discard its result instead of clobbering a fresher
+// entry. Call this after any state change that should be reflected in the feed
+// (episode published, channel metadata edited, etc.).
 func (s *RSSService) InvalidateCache(channelID uint64) {
 	s.cacheMu.Lock()
 	delete(s.cache, channelID)
+	s.cacheVersion[channelID]++
 	s.cacheMu.Unlock()
 }
 

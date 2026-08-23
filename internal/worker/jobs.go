@@ -72,7 +72,13 @@ func (h *FeedRefreshHandler) Run(ctx context.Context) error {
 	}
 	refreshed := 0
 	for _, ch := range channels {
-		h.rssSvc.InvalidateCache(ch.ID)
+		// GenerateFeed(useCache=false) rebuilds from current DB state under the
+		// cache write lock and stores the fresh result atomically. We do NOT
+		// call InvalidateCache first: that delete-then-rebuild sequence opened a
+		// window where a concurrent publish could invalidate (bump version)
+		// between the delete and this rebuild's write, letting our rebuild
+		// clobber the publish. The CAS version check inside GenerateFeed now
+		// guards that case directly.
 		if _, err := h.rssSvc.GenerateFeed(ch.ID, false); err != nil {
 			h.logger.Errorf("[rss-refresh] channel %d failed: %v", ch.ID, err)
 			continue
