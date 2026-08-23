@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>播放节目 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+<style>
+.danmaku-area{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+.danmaku-item{position:absolute;white-space:nowrap;font-size:16px;font-weight:bold;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.6);animation:dm linear forwards}
+@keyframes dm{from{transform:translateX(100%)}to{transform:translateX(-100%)}}
+.player-wrap{background:#0f172a;border-radius:12px;padding:24px;color:#fff;position:relative;overflow:hidden}
+.player-main{display:grid;grid-template-columns:240px 1fr;gap:24px;align-items:start}
+.player-title{font-size:24px;font-weight:700;margin-bottom:8px}
+.player-ch{color:#94a3b8;margin-bottom:16px}
+.player-desc{color:#cbd5e1;font-size:14px;line-height:1.8;white-space:pre-wrap}
+@media(max-width:768px){.player-main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<nav class="navbar"><div class="navbar-inner">
+  <a href="/dashboard" class="logo">🎙️ Podcast Admin</a>
+  <div class="nav-links"></div>
+</div></nav>
+<div class="container page">
+  <div class="player-wrap" id="pw">
+    <div class="danmaku-area" id="dmArea"></div>
+    <div id="loading" class="empty" style="color:#fff;padding:60px 0">加载中...</div>
+    <div id="content" style="display:none">
+      <div class="player-main">
+        <div>
+          <img id="cover" style="width:100%;border-radius:10px;aspect-ratio:1;object-fit:cover;background:#334155">
+        </div>
+        <div>
+          <div class="player-ch" id="ch">频道</div>
+          <h1 class="player-title" id="ttl">标题</h1>
+          <div style="display:flex;gap:16px;color:#94a3b8;font-size:13px;margin-bottom:20px;flex-wrap:wrap">
+            <span id="s01">时长 -</span>
+            <span id="s02">S0 E0</span>
+            <span id="s03">0 次播放</span>
+            <span id="s04">发布于 -</span>
+          </div>
+          <audio id="audio" controls style="width:100%;margin-bottom:24px"></audio>
+          <div class="form-group">
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+              <label style="margin:0;color:#cbd5e1;cursor:pointer"><input type="checkbox" id="dmSwitch" checked onchange="toggleDm()"> 开启弹幕</label>
+              <span style="color:#94a3b8;font-size:13px;margin-left:8px" id="dmCount"></span>
+            </div>
+          </div>
+          <div class="player-desc" id="desc"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid grid-2" style="margin-top:24px">
+    <div class="card">
+      <div class="card-header"><h2 class="card-title">章节</h2><span class="badge badge-draft" id="chpCount"></span></div>
+      <div id="chapters" class="empty">暂无章节</div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h2 class="card-title">评论区</h2>
+        <div style="color:var(--muted);font-size:13px" id="cmtCount"></div>
+      </div>
+      <form id="cmtForm" style="display:flex;gap:8px;margin-bottom:20px">
+        <input class="form-input" id="cmtInput" placeholder="写下你的评论..." required maxlength="500">
+        <button class="btn btn-primary" type="submit">发送</button>
+      </form>
+      <div id="comments" class="empty">加载中...</div>
+    </div>
+  </div>
+</div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+requireAuth();
+renderNav();
+let epId = +new URLSearchParams(location.search).get("id");
+let danmakuEnabled = true;
+let danmakuList = [];
+let dmTimers = [];
+
+(async function main(){
+  if (!epId) { $("#loading").textContent = "节目 ID 无效"; return; }
+  const e = await get("/episodes/" + epId);
+  if (e.code !== 0) { $("#loading").textContent = e.message; return; }
+  const d = e.data;
+  $("#content").style.display = "block";
+  $("#loading").style.display = "none";
+  document.title = d.title + " - Podcast";
+  $("#cover").src = d.cover_image_url || `https://placehold.co/480/6366f1/fff?text=${encodeURIComponent(d.title.slice(0,6))}`;
+  $("#ttl").textContent = d.title;
+  const ch = await get("/channels/" + d.channel_id);
+  $("#ch").textContent = ch.code===0 ? ch.data.title : ("频道 #" + d.channel_id);
+  $("#s01").textContent = "时长 " + formatDuration(d.duration);
+  $("#s02").textContent = (d.season_number?"S"+d.season_number:"") + (d.episode_number?" E"+d.episode_number:"") || "单集";
+  $("#s03").textContent = (d.play_count||0) + " 次播放";
+  $("#s04").textContent = "发布于 " + formatDate(d.published_at || d.created_at);
+  $("#desc").textContent = d.description || "";
+  const au = $("#audio");
+  if (d.audio_file_url) {
+    au.src = d.audio_file_url;
+    au.addEventListener("play", startPlayback);
+  } else {
+    au.insertAdjacentHTML("beforebegin", `<div class="alert alert-error">暂无音频文件</div>`);
+  }
+
+  renderChapters(d.chapters || []);
+  loadComments();
+  loadDanmaku();
+  au.addEventListener("timeupdate", onTimeUpdate);
+})();
+
+function renderChapters(chp) {
+  $("#chpCount").textContent = chp.length + " 章";
+  if (!chp.length) return;
+  $("#chapters").className = "";
+  $("#chapters").innerHTML = chp.map(c => `
+    <div style="display:flex;gap:12px;padding:12px;border-radius:6px;cursor:pointer" onclick="seek(${c.start_time})">
+      <span style="color:var(--primary);font-variant-numeric:tabular-nums;font-weight:600">${formatDuration(c.start_time)}</span>
+      <div><div style="font-weight:500">${escapeHtml(c.title)}</div>
+      ${c.url?`<div style="font-size:12px;color:var(--muted)"><a href="${c.url}" target="_blank">${escapeHtml(c.url)}</a></div>`:""}
+      </div>
+    </div>`).join("");
+}
+function seek(t) { $("#audio").currentTime = t; }
+
+async function startPlayback() {
+  await post("/episodes/playback/start", { episode_id: epId, source: "web" });
+}
+
+function onTimeUpdate() {
+  if (!danmakuEnabled) return;
+  const t = Math.floor($("#audio").currentTime);
+  while (danmakuList.length && danmakuList[0].t <= t) {
+    showDanmaku(danmakuList.shift().content);
+  }
+}
+
+async function loadComments() {
+  const r = await get(`/episodes/${epId}/comments`);
+  if (r.code !== 0) return;
+  $("#cmtCount").textContent = r.total + " 条评论";
+  if (!r.data.length) { $("#comments").className = "empty"; $("#comments").textContent = "还没有评论，来抢沙发！"; return; }
+  $("#comments").className = "";
+  $("#comments").innerHTML = r.data.map(c => `
+    <div style="padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-weight:500">${escapeHtml(c.nickname||"匿名")}</span>
+        <span style="color:var(--muted);font-size:12px">${formatDate(c.created_at)}</span>
+      </div>
+      <div style="color:var(--text)">${escapeHtml(c.content)}</div>
+    </div>`).join("");
+}
+
+$("#cmtForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const content = $("#cmtInput").value.trim();
+  if (!content) return;
+  const r = await post(`/episodes/${epId}/comments`, { episode_id: epId, channel_id: null, type: "text", content });
+  if (r.code === 0) { $("#cmtInput").value = ""; toast("评论已提交，审核后显示"); loadComments(); }
+  else toast(r.message, "error");
+});
+
+async function loadDanmaku() {
+  const r = await get(`/episodes/${epId}/danmaku`);
+  if (r.code !== 0) return;
+  $("#dmCount").textContent = (r.data||[]).length + " 条弹幕";
+  danmakuList = (r.data||[]).map(x => ({ t: Math.floor(x.danmaku_time||0), content: x.content }))
+    .sort((a, b) => a.t - b.t);
+}
+
+function showDanmaku(text) {
+  const area = $("#dmArea");
+  const el = document.createElement("div");
+  el.className = "danmaku-item";
+  el.textContent = text;
+  const top = Math.random() * 80;
+  const dur = 6 + Math.random() * 4;
+  el.style.top = top + "%";
+  el.style.animationDuration = dur + "s";
+  area.appendChild(el);
+  setTimeout(() => el.remove(), dur * 1000);
+}
+
+function toggleDm() {
+  danmakuEnabled = $("#dmSwitch").checked;
+  if (!danmakuEnabled) $("#dmArea").innerHTML = "";
+}
+</script>
+</body>
+</html>
