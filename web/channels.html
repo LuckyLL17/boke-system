@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>频道管理 - Podcast</title>
+<link rel="stylesheet" href="/static/assets/css/style.css">
+</head>
+<body>
+<nav class="navbar"><div class="navbar-inner">
+  <a href="/dashboard" class="logo">🎙️ Podcast Admin</a>
+  <div class="nav-links"></div>
+</div></nav>
+<div class="container page">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px">
+    <div>
+      <h1 class="page-title">频道管理</h1>
+      <p class="page-sub">创建和管理你的播客频道</p>
+    </div>
+    <button class="btn btn-primary" onclick="openChannelModal()">+ 创建频道</button>
+  </div>
+  <div class="card">
+    <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+      <input class="form-input" id="kw" style="max-width:240px" placeholder="搜索频道..." onkeyup="if(event.key==='Enter')loadList(1)">
+      <select class="form-select" id="st" style="max-width:160px" onchange="loadList(1)">
+        <option value="">全部状态</option>
+        <option value="pending">审核中</option>
+        <option value="approved">已通过</option>
+        <option value="rejected">已拒绝</option>
+      </select>
+      <button class="btn btn-secondary" onclick="loadList(1)">搜索</button>
+    </div>
+    <table class="table">
+      <thead><tr><th style="width:60px">ID</th><th>封面</th><th>标题</th><th>Slug</th><th>节目数</th><th>订阅</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody id="tbody"><tr><td colspan="9" class="empty">加载中...</td></tr></tbody>
+    </table>
+    <div class="pagination" id="pg"></div>
+  </div>
+</div>
+<div id="modalRoot"></div>
+<script src="/static/assets/js/app.js"></script>
+<script>
+requireAuth();
+renderNav("channels");
+let page = 1;
+let pageSize = 20;
+
+function loadList(p) {
+  page = p || 1;
+  const kw = $("#kw").value;
+  const st = $("#st").value;
+  updateQuery({page: page, keyword: kw, status: st});
+  main();
+}
+
+async function main() {
+  const q = pageQuery({page:1,page_size:20});
+  page = +q.page; pageSize = +q.page_size;
+  $("#kw").value = q.keyword || ""; $("#st").value = q.status || "";
+  const d = await get("/channels/mine/list" + qs({page,page_size:pageSize,keyword:q.keyword,status:q.status}));
+  if (d.code !== 0) { $("#tbody").innerHTML = `<tr><td colspan="9" class="empty">${escapeHtml(d.message)}</td></tr>`; return; }
+  if (!d.data.length) {
+    $("#tbody").innerHTML = `<tr><td colspan="9" class="empty">暂无频道，点击"创建频道"开始创建</td></tr>`;
+    $("#pg").innerHTML = ""; return;
+  }
+  $("#tbody").innerHTML = d.data.map(r => `
+    <tr>
+      <td>${r.id}</td>
+      <td><img src="${r.cover_image_url || `https://placehold.co/48/6366f1/fff?text=#`}" style="width:48px;height:48px;border-radius:6px;object-fit:cover"></td>
+      <td><strong>${escapeHtml(r.title)}</strong><div style="color:var(--muted);font-size:12px;margin-top:2px">${escapeHtml(r.description||"").slice(0,60)}</div></td>
+      <td><code>${escapeHtml(r.slug)}</code></td>
+      <td>${r.episode_count || 0}</td>
+      <td>${r.subscriber_count || 0}</td>
+      <td><span class="badge badge-${cSt(r.status)}">${cStT(r.status)}</span></td>
+      <td>${formatDate(r.created_at)}</td>
+      <td><div class="table-actions">
+        <a class="btn btn-sm btn-secondary" href="/episodes?channel=${r.id}">节目</a>
+        <a class="btn btn-sm btn-secondary" href="/stats?channel=${r.id}">统计</a>
+        <a class="btn btn-sm btn-secondary" href="/rss-view?channel=${r.id}">RSS</a>
+        <button class="btn btn-sm btn-secondary" onclick="editChannel(${r.id})">编辑</button>
+        <button class="btn btn-sm btn-danger" onclick="delChannel(${r.id},'${escapeHtml(r.title)}')">删除</button>
+      </div></td>
+    </tr>
+  `).join("");
+  renderPagination(d.total);
+}
+function cSt(s){return({pending:"pending",approved:"approved",rejected:"rejected"}[s])||"draft"}
+function cStT(s){return({pending:"审核中",approved:"已通过",rejected:"已拒绝"}[s])||s}
+
+function renderPagination(total) {
+  const pages = Math.ceil(total / pageSize);
+  if (pages <= 1) { $("#pg").innerHTML = ""; return; }
+  let html = `<button class="page-btn" ${page<=1?"disabled":""} onclick="loadList(${page-1})">上一页</button>`;
+  const start = Math.max(1, page - 3), end = Math.min(pages, page + 3);
+  for (let i = start; i <= end; i++) html += `<button class="page-btn ${i===page?"active":""}" onclick="loadList(${i})">${i}</button>`;
+  html += `<button class="page-btn" ${page>=pages?"disabled":""} onclick="loadList(${page+1})">下一页</button>`;
+  html += `<span style="color:var(--muted);margin-left:12px">共 ${total} 条</span>`;
+  $("#pg").innerHTML = html;
+}
+
+function openChannelModal(ch) {
+  const isEdit = !!ch;
+  const data = ch || { title:"", description:"", cover_image_url:"", language:"zh-CN", author:"", email:"", itunes_category:"", explicit:false };
+  $("#modalRoot").innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
+    <div class="modal">
+      <div class="modal-head"><h3>${isEdit?"编辑":"创建"}频道</h3><button class="btn btn-sm btn-secondary" onclick="closeModal()">×</button></div>
+      <form id="chForm">
+        <div class="form-group"><label class="form-label">频道名称 *</label><input class="form-input" name="title" required value="${escapeHtml(data.title)}"></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">作者</label><input class="form-input" name="author" value="${escapeHtml(data.author||"")}"></div>
+          <div class="form-group"><label class="form-label">联系邮箱</label><input class="form-input" type="email" name="email" value="${escapeHtml(data.email||"")}"></div>
+        </div>
+        <div class="form-group"><label class="form-label">封面图 URL</label><input class="form-input" name="cover_image_url" value="${escapeHtml(data.cover_image_url||"")}"></div>
+        <div class="form-group"><label class="form-label">简介</label><textarea class="form-textarea" name="description">${escapeHtml(data.description||"")}</textarea></div>
+        <div class="form-row">
+          <div class="form-group"><label class="form-label">语言</label><input class="form-input" name="language" value="${escapeHtml(data.language||"zh-CN")}"></div>
+          <div class="form-group"><label class="form-label">iTunes 分类</label><input class="form-input" name="itunes_category" value="${escapeHtml(data.itunes_category||"")}"></div>
+        </div>
+        <div class="form-group"><label><input type="checkbox" name="explicit" ${data.explicit?"checked":""}> 包含显式内容</label></div>
+        <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:24px">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
+          <button type="submit" class="btn btn-primary">${isEdit?"保存":"创建"}</button>
+        </div>
+      </form>
+    </div></div>`;
+  $("#chForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target;
+    const body = {
+      title: f.title.value.trim(), description: f.description.value,
+      cover_image_url: f.cover_image_url.value, language: f.language.value,
+      author: f.author.value, email: f.email.value,
+      itunes_category: f.itunes_category.value, explicit: f.explicit.checked,
+    };
+    const r = isEdit ? await put(`/channels/${ch.id}`, body) : await post("/channels", body);
+    if (r.code === 0) { toast(isEdit?"已保存":"已创建", "success"); closeModal(); main(); }
+    else toast(r.message, "error");
+  });
+}
+function closeModal(){ $("#modalRoot").innerHTML = ""; }
+
+async function editChannel(id) {
+  const r = await get("/channels/" + id);
+  if (r.code === 0) openChannelModal(r.data);
+}
+function delChannel(id, title) {
+  if (!confirmDialog(`确定删除频道"${title}"？此操作无法撤销。`)) return;
+  del("/channels/" + id).then(r => {
+    if (r.code === 0) { toast("已删除", "success"); main(); } else toast(r.message, "error");
+  });
+}
+main();
+</script>
+</body>
+</html>
