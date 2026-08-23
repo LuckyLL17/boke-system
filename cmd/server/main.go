@@ -107,7 +107,7 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.Default()
-	api.SetupRouter(r, repos, svc, storagePath, webDir)
+	rateLimiters := api.SetupRouter(r, repos, svc, storagePath, webDir)
 
 	srv := &http.Server{
 		Addr:         cfg.Addr(),
@@ -148,6 +148,9 @@ func main() {
 	_ = workerInst.Stop(ctx)
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Errorf("server shutdown error: %v", err)
+	}
+	for _, rl := range rateLimiters {
+		rl.Close()
 	}
 	log.Info("server exited")
 }

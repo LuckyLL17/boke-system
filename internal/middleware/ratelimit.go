@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"podcast-platform/config"
 )
 
 type RateLimiter struct {
@@ -14,6 +13,8 @@ type RateLimiter struct {
 	visitors map[string]*visitor
 	rate     int
 	window   time.Duration
+	stop     chan struct{}
+	stopped  chan struct{}
 }
 
 type visitor struct {
@@ -22,26 +23,24 @@ type visitor struct {
 }
 
 func NewRateLimiter(ratePerMin int) *RateLimiter {
-	window := time.Minute
-	if config.AppConfig != nil && config.AppConfig.Worker.CleanupInterval > 0 {
-		window = time.Duration(config.AppConfig.Worker.CleanupInterval) * time.Second
-	}
-	return &RateLimiter{
+	rl := &RateLimiter{
 		visitors: make(map[string]*visitor),
 		rate:     ratePerMin,
-		window:   window,
+		window:   time.Minute,
+		stop:     make(chan struct{}),
+		stopped:  make(chan struct{}),
 	}
+	go rl.cleanupLoop()
+	return rl
 }
 
 func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		go rl.cleanup()
 		key := c.ClientIP()
 		rl.mu.Lock()
 		v, ok := rl.visitors[key]
 		if !ok {
-			v = &visitor{count: 1, lastCheck: time.Now()}
-			rl.visitors[key] = v
+			rl.visitors[key] = &visitor{count: 1, lastCheck: time.Now()}
 			rl.mu.Unlock()
 			c.Next()
 			return
@@ -71,26 +70,42 @@ func (rl *RateLimiter) Middleware() gin.HandlerFunc {
 	}
 }
 
-func (rl *RateLimiter) cleanup() {
+func (rl *RateLimiter) cleanupLoop() {
+	defer close(rl.stopped)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		for k, v := range rl.visitors {
-			if now.Sub(v.lastCheck) > rl.window*2 {
-				delete(rl.visitors, k)
+	for {
+		select {
+		case <-rl.stop:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			for k, v := range rl.visitors {
+				if now.Sub(v.lastCheck) > rl.window*2 {
+					delete(rl.visitors, k)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
 }
 
-func PerUserRateLimit(ratePerMin int) gin.HandlerFunc {
-	rl := NewRateLimiter(ratePerMin)
-	return rl.Middleware()
+func (rl *RateLimiter) Close() {
+	select {
+	case <-rl.stop:
+		return
+	default:
+		close(rl.stop)
+	}
+	<-rl.stopped
 }
 
-func GlobalRateLimit() gin.HandlerFunc {
+func PerUserRateLimit(ratePerMin int) (*RateLimiter, gin.HandlerFunc) {
+	rl := NewRateLimiter(ratePerMin)
+	return rl, rl.Middleware()
+}
+
+func GlobalRateLimit() (*RateLimiter, gin.HandlerFunc) {
 	return PerUserRateLimit(120)
 }

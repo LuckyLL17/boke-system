@@ -34,11 +34,15 @@ type Services struct {
 	SubscriberSvc *service.SubscriberService
 }
 
-func SetupRouter(r *gin.Engine, repos *Repositories, svc *Services, storageServePath, webDir string) {
+func SetupRouter(r *gin.Engine, repos *Repositories, svc *Services, storageServePath, webDir string) []*middleware.RateLimiter {
+	var limiters []*middleware.RateLimiter
+
 	r.Use(middleware.CORS())
 	r.Use(middleware.Logger())
-	r.Use(middleware.GlobalRateLimit())
-	r.Use(middleware.GlobalRateLimit())
+
+	globalLimiter, globalMW := middleware.GlobalRateLimit()
+	limiters = append(limiters, globalLimiter)
+	r.Use(globalMW)
 
 	r.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, dto.Err(404, "not found"))
@@ -70,8 +74,14 @@ func SetupRouter(r *gin.Engine, repos *Repositories, svc *Services, storageServe
 	{
 		auth := api.Group("/auth")
 		{
-			auth.POST("/register", middleware.PerUserRateLimit(10), authH.Register)
-			auth.POST("/login", middleware.PerUserRateLimit(15), authH.Login)
+			registerLimiter, registerMW := middleware.PerUserRateLimit(10)
+			limiters = append(limiters, registerLimiter)
+			auth.POST("/register", registerMW, authH.Register)
+
+			loginLimiter, loginMW := middleware.PerUserRateLimit(15)
+			limiters = append(limiters, loginLimiter)
+			auth.POST("/login", loginMW, authH.Login)
+
 			auth.POST("/logout", authH.Logout)
 			auth.GET("/me", middleware.AuthMiddleware(svc.AuthSvc), authH.Me)
 			auth.PUT("/password", middleware.AuthMiddleware(svc.AuthSvc), authH.ChangePassword)
@@ -152,4 +162,6 @@ func SetupRouter(r *gin.Engine, repos *Repositories, svc *Services, storageServe
 		})
 		unsub.GET("/:token", rssH.Unsubscribe)
 	}
+
+	return limiters
 }
