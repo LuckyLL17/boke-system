@@ -82,6 +82,7 @@ func main() {
 
 	episodeSvc := service.NewEpisodeService(repos.EpisodeRepo, repos.ChapterRepo, repos.ChannelRepo, audioSvc)
 	rssSvc := service.NewRSSService(repos.ChannelRepo, repos.EpisodeRepo, cfg.Server.BaseURL)
+	channelSvc.SetCacheInvalidator(rssSvc)
 
 	statsSvc := service.NewStatsService(repos.PlaybackRepo, repos.EpisodeRepo, repos.ChannelRepo, repos.SubscriberRepo)
 	commentSvc := service.NewCommentService(repos.CommentRepo, repos.EpisodeRepo, repos.ChannelRepo)

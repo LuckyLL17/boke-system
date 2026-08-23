@@ -84,6 +84,7 @@ func (h *ChannelHandler) Update(c *gin.Context) {
 		Email:          body.Email,
 		CategoryID:     body.CategoryID,
 		Explicit:       body.Explicit,
+		CustomDomain:   body.CustomDomain,
 		ITunesCategory: body.ITunesCategory,
 	}
 	ch, err := h.channelSvc.Update(id, userID, req)

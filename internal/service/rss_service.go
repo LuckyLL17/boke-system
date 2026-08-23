@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/xml"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,7 +59,8 @@ func (s *RSSService) GenerateFeed(channelID uint64, useCache bool) (string, erro
 	if err != nil {
 		return "", appErr.Wrap(err, 500, "load episodes")
 	}
-	feed := s.generator.GenerateFeed(ch, episodes, s.baseSiteURL)
+	baseSiteURL := s.channelBaseURL(ch)
+	feed := s.generator.GenerateFeed(ch, episodes, baseSiteURL)
 	ttl := time.Duration(config.AppConfig.Cache.RSSTTL) * time.Second
 	s.cacheMu.Lock()
 	if len(s.cache) > 1000 {
@@ -114,23 +116,31 @@ func (s *RSSService) GetSubscribeLinks(channelID uint64, slug string) (map[strin
 	if err != nil {
 		return nil, appErr.ErrChannelNotFound
 	}
-	base := s.baseSiteURL
-	if ch.CustomDomain != "" {
-		base = s.baseSiteURL
+	base := s.channelBaseURL(ch)
+	if slug == "" {
+		slug = ch.Slug
 	}
 	if slug == "" {
 		slug = "channel-" + uint64Str(channelID)
 	}
 	rssURL := base + "/api/v1/channels/" + uint64Str(channelID) + "/rss"
+	slugRSSURL := base + "/rss/" + slug + ".xml"
 	links := map[string]string{
-		"rss":          rssURL,
-		"apple":        "https://podcasts.apple.com/subscribe?url=" + rssURL,
-		"spotify":      "https://open.spotify.com/search/" + rssURL,
-		"google":       "https://podcasts.google.com/?feed=" + rssURL,
-		"xiaoyuzhou":   "https://www.xiaoyuzhoufm.com/podcast?url=" + rssURL,
-		"slug_rss":     s.baseSiteURL + "/rss/" + slug + ".xml",
+		"rss":        rssURL,
+		"slug_rss":   slugRSSURL,
+		"apple":      "https://podcasts.apple.com/subscribe?url=" + rssURL,
+		"spotify":    "https://open.spotify.com/search/" + rssURL,
+		"google":     "https://podcasts.google.com/?feed=" + rssURL,
+		"xiaoyuzhou": "https://www.xiaoyuzhoufm.com/podcast?url=" + rssURL,
 	}
 	return links, nil
+}
+
+func (s *RSSService) channelBaseURL(ch *domain.Channel) string {
+	if ch != nil && ch.CustomDomain != "" {
+		return strings.TrimRight(ch.CustomDomain, "/")
+	}
+	return s.baseSiteURL
 }
 
 func uint64Str(n uint64) string {

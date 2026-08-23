@@ -100,7 +100,7 @@ function renderPagination(total) {
 
 function openChannelModal(ch) {
   const isEdit = !!ch;
-  const data = ch || { title:"", description:"", cover_image_url:"", language:"zh-CN", author:"", email:"", itunes_category:"", explicit:false };
+  const data = ch || { title:"", description:"", cover_image_url:"", language:"zh-CN", author:"", email:"", itunes_category:"", explicit:false, custom_domain:"" };
   $("#modalRoot").innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()">
     <div class="modal">
       <div class="modal-head"><h3>${isEdit?"编辑":"创建"}频道</h3><button class="btn btn-sm btn-secondary" onclick="closeModal()">×</button></div>
@@ -111,6 +111,7 @@ function openChannelModal(ch) {
           <div class="form-group"><label class="form-label">联系邮箱</label><input class="form-input" type="email" name="email" value="${escapeHtml(data.email||"")}"></div>
         </div>
         <div class="form-group"><label class="form-label">封面图 URL</label><input class="form-input" name="cover_image_url" value="${escapeHtml(data.cover_image_url||"")}"></div>
+        <div class="form-group"><label class="form-label">自定义域名</label><input class="form-input" name="custom_domain" placeholder="例如 https://podcast.example.com" value="${escapeHtml(data.custom_domain||"")}"><div style="color:var(--muted);font-size:12px;margin-top:4px">留空则使用平台地址，用于生成 RSS 订阅链接</div></div>
         <div class="form-group"><label class="form-label">简介</label><textarea class="form-textarea" name="description">${escapeHtml(data.description||"")}</textarea></div>
         <div class="form-row">
           <div class="form-group"><label class="form-label">语言</label><input class="form-input" name="language" value="${escapeHtml(data.language||"zh-CN")}"></div>
@@ -131,6 +132,7 @@ function openChannelModal(ch) {
       cover_image_url: f.cover_image_url.value, language: f.language.value,
       author: f.author.value, email: f.email.value,
       itunes_category: f.itunes_category.value, explicit: f.explicit.checked,
+      custom_domain: f.custom_domain.value.trim(),
     };
     const r = isEdit ? await put(`/channels/${ch.id}`, body) : await post("/channels", body);
     if (r.code === 0) { toast(isEdit?"已保存":"已创建", "success"); closeModal(); main(); }

@@ -1,18 +1,29 @@
 package service
 
 import (
+	"strings"
+
 	"podcast-platform/internal/domain"
 	"podcast-platform/internal/repository"
 	appErr "podcast-platform/pkg/errors"
 	"podcast-platform/pkg/utils"
 )
 
+type CacheInvalidator interface {
+	InvalidateCache(channelID uint64)
+}
+
 type ChannelService struct {
 	channelRepo *repository.ChannelRepository
+	invalidator CacheInvalidator
 }
 
 func NewChannelService(channelRepo *repository.ChannelRepository) *ChannelService {
 	return &ChannelService{channelRepo: channelRepo}
+}
+
+func (s *ChannelService) SetCacheInvalidator(inv CacheInvalidator) {
+	s.invalidator = inv
 }
 
 type CreateChannelRequest struct {
@@ -114,14 +125,27 @@ func (s *ChannelService) Update(id, ownerID uint64, req *UpdateChannelRequest) (
 	if req.Explicit != nil {
 		ch.Explicit = *req.Explicit
 	}
-	if req.CustomDomain != "" {
-		ch.CustomDomain = req.CustomDomain
-	}
+	domainChanged := ch.CustomDomain != req.CustomDomain
+	ch.CustomDomain = normalizeDomain(req.CustomDomain)
 	ch.ITunesCategory = req.ITunesCategory
 	if err := s.channelRepo.Update(ch); err != nil {
 		return nil, appErr.Wrap(err, 500, "update failed")
 	}
+	if domainChanged && s.invalidator != nil {
+		s.invalidator.InvalidateCache(id)
+	}
 	return ch, nil
+}
+
+func normalizeDomain(d string) string {
+	d = strings.TrimSpace(d)
+	if d == "" {
+		return ""
+	}
+	if !strings.HasPrefix(strings.ToLower(d), "http://") && !strings.HasPrefix(strings.ToLower(d), "https://") {
+		d = "https://" + d
+	}
+	return strings.TrimRight(d, "/")
 }
 
 func (s *ChannelService) Delete(id, ownerID uint64) error {

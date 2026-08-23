@@ -79,13 +79,10 @@ async function main() {
   if (!id) return;
   curChannelID = id;
   $("#rssArea").style.display = "block";
-  const rssBase = `${location.origin}/api/v1/channels/${id}/rss`;
   const ch = await get("/channels/" + id);
-  let slugUrl = "";
-  if (ch.code === 0 && ch.data.slug) slugUrl = `${location.origin}/rss/${ch.data.slug}.xml`;
-  $("#rssUrl").value = rssBase;
-  $("#slugUrl").value = slugUrl;
-  $("#rssOpenBtn").href = rssBase;
+  $("#rssUrl").value = "";
+  $("#slugUrl").value = "";
+  $("#rssOpenBtn").href = "#";
   $("#exportBtn").href = `/api/v1/channels/${id}/subscribers/export`;
   $("#exportBtn").onclick = function(e) {
     e.preventDefault();
@@ -106,6 +103,15 @@ async function main() {
   const lk = await get(`/channels/${id}/rss/links`);
   if (lk.code === 0) {
     const data = lk.data;
+    const rssLink = data.rss || "";
+    const slugLink = data.slug_rss || "";
+    if (rssLink) {
+      $("#rssUrl").value = rssLink;
+      $("#rssOpenBtn").href = rssLink;
+    }
+    if (slugLink) {
+      $("#slugUrl").value = slugLink;
+    }
     $("#linksArea").className = "grid grid-2";
     $("#linksArea").innerHTML = Object.entries(data).map(([k, u]) => `
       <a class="btn btn-secondary" style="text-align:left;padding:16px" href="${u}" target="_blank">
